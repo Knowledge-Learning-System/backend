@@ -9,7 +9,7 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>cn.edu.bcu</groupId>
-	<artifactId>Learning-System</artifactId>
+	<artifactId>Knowledge-Learning-System</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name/>
 	<description/>
