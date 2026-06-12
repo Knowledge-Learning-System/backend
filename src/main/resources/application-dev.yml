@@ -1,14 +1,17 @@
+# 本地开发：先建立 SSH 隧道再启动后端（本机若已装 MySQL 占 3306，必须用 3307 转发）
+# ssh -L 3307:localhost:3306 -L 7687:localhost:7687 -L 7474:localhost:7474 root@47.98.101.99
+
 spring:
   neo4j:
     uri: bolt://localhost:7687
     authentication:
       username: neo4j
-      password: 12345678
+      password: Knowledge-Learning-System2026
 
   datasource:
-    url: jdbc:mysql://localhost:3306/learning_system?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+    url: jdbc:mysql://localhost:3307/learning_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
     username: root
-    password: 123456
+    password: Knowledge-Learning-System2026
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 mybatis:
@@ -21,6 +24,13 @@ mybatis:
 server:
   port: 8080
 
+resource:
+  base-path: "E:\\work\\2026\\数据库系统原理"
+
 logging:
   level:
     cn.edu.bcu.learning: DEBUG
+
+jwt:
+  secret: knowledge-learning-jwt-secret-key-2026
+  expiration: 604800000

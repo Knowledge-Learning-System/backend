@@ -5,25 +5,22 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("course")
-public class Course {
+@TableName("courseware_resource")
+public class CoursewareResource {
 
     @TableId(type = IdType.AUTO)
     private Integer id;
 
-    private String name;
+    private Integer courseId;
 
-    private String description;
+    private String knowledgePointId;
 
-    private String cover;
+    private String title;
 
-    private String source;
+    private String filePath;
 
-    private Integer status;
+    private String fileType;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
-
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updateTime;
 }

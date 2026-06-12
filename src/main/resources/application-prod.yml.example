@@ -1,0 +1,33 @@
+# 复制为 application-prod.yml 后填入真实密码（application-prod.yml 已在 .gitignore 中）
+# cp application-prod.yml.example application-prod.yml
+
+spring:
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: YOUR_NEO4J_PASSWORD
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/learning_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf-8
+    username: root
+    password: YOUR_MYSQL_PASSWORD
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: cn.edu.bcu.learning.domain.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+server:
+  port: 8080
+
+logging:
+  level:
+    cn.edu.bcu.learning: INFO
+    root: WARN
+
+jwt:
+  secret: change-this-to-a-long-random-string
+  expiration: 604800000

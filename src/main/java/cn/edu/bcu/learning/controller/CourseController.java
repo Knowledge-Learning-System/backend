@@ -1,0 +1,112 @@
+package cn.edu.bcu.learning.controller;
+
+import cn.edu.bcu.learning.domain.dto.EnrollRequest;
+import cn.edu.bcu.learning.domain.dto.SwitchCourseRequest;
+import cn.edu.bcu.learning.domain.entity.Course;
+import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
+import cn.edu.bcu.learning.domain.vo.*;
+import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
+import cn.edu.bcu.learning.repository.neo4j.KnowledgeGraphRepository;
+import cn.edu.bcu.learning.service.CourseService;
+import cn.edu.bcu.learning.service.KnowledgeGraphService;
+import cn.edu.bcu.learning.utils.Result;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+@RestController
+@RequestMapping("/courses")
+public class CourseController {
+
+    private final CourseService courseService;
+    private final KnowledgeGraphService knowledgeGraphService;
+    private final KnowledgeGraphRepository knowledgeGraphRepository;
+    private final KnowledgeMasteryMapper knowledgeMasteryMapper;
+
+    public CourseController(CourseService courseService, KnowledgeGraphService knowledgeGraphService,
+                            KnowledgeGraphRepository knowledgeGraphRepository, KnowledgeMasteryMapper knowledgeMasteryMapper) {
+        this.courseService = courseService;
+        this.knowledgeGraphService = knowledgeGraphService;
+        this.knowledgeGraphRepository = knowledgeGraphRepository;
+        this.knowledgeMasteryMapper = knowledgeMasteryMapper;
+        System.out.println("CourseController 初始化成功！");
+    }
+
+    @GetMapping
+    public Result<?> listCourses() {
+        return Result.success().setData(courseService.listCourses());
+    }
+
+    @GetMapping("/my")
+    public Result<?> listMyCourses(HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        return Result.success().setData(courseService.listMyCourses(userId));
+    }
+
+    @PostMapping("/enroll")
+    public Result<?> enroll(@RequestBody EnrollRequest enrollRequest, HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        courseService.enroll(userId, enrollRequest.getCourseId());
+        return Result.success();
+    }
+
+    @PutMapping("/current")
+    public Result<?> switchCurrentCourse(@RequestBody SwitchCourseRequest switchRequest, HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        courseService.switchCurrentCourse(userId, switchRequest.getCourseId());
+        return Result.success();
+    }
+
+    // 学习路径导航
+    @GetMapping("/{courseId}/learning-path")
+    public Result<List<LearningPathItemVO>> getLearningPath(@PathVariable Integer courseId) {
+        Course course = courseService.getCourseById(courseId);
+        return Result.success(knowledgeGraphService.getLearningPathBySource(course.getSource()));
+    }
+
+    // 章-知识点层级结构（含视频/课件/测试题）
+    @GetMapping("/{courseId}/chapters")
+    public Result<List<SubTopicVO>> getChapters(@PathVariable Integer courseId) {
+        Course course = courseService.getCourseById(courseId);
+        return Result.success(knowledgeGraphService.getChapterStructure(courseId, course.getSource()));
+    }
+
+    // 学习推荐
+    @GetMapping("/{courseId}/recommendation")
+    public Result<List<RecommendationVO>> getRecommendation(@PathVariable Integer courseId, HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        Course course = courseService.getCourseById(courseId);
+        String source = course.getSource();
+
+        List<String> allKpIds = knowledgeGraphRepository.findAllKpIdsBySource(source);
+        if (allKpIds.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+
+        LambdaQueryWrapper<KnowledgeMastery> wrapper = new LambdaQueryWrapper<KnowledgeMastery>()
+                .eq(KnowledgeMastery::getUserId, userId)
+                .in(KnowledgeMastery::getKnowledgePointId, allKpIds);
+        List<KnowledgeMastery> masteryList = knowledgeMasteryMapper.selectList(wrapper);
+
+        Map<String, Integer> masteryMap = masteryList.stream()
+                .collect(Collectors.toMap(KnowledgeMastery::getKnowledgePointId, KnowledgeMastery::getMasteryLevel));
+
+        List<String> sortedKpIds = allKpIds.stream()
+                .sorted(Comparator.comparingInt(kpId -> masteryMap.getOrDefault(kpId, 0)))
+                .limit(5)
+                .toList();
+
+        List<RecommendationVO> result = new ArrayList<>();
+        for (String kpId : sortedKpIds) {
+            KnowledgePointDetailVO detail = knowledgeGraphService.getKnowledgePointDetail(kpId);
+            int level = masteryMap.getOrDefault(kpId, 0);
+            String reason = "掌握度 " + level + "%" + (level < 30 ? "，建议优先学习" : "");
+            result.add(new RecommendationVO(detail.getId(), detail.getName(), detail.getDescription(), reason));
+        }
+
+        return Result.success(result);
+    }
+}

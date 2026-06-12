@@ -5,21 +5,19 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("course")
-public class Course {
+@TableName("video_progress")
+public class VideoProgress {
 
     @TableId(type = IdType.AUTO)
     private Integer id;
 
-    private String name;
+    private Integer userId;
 
-    private String description;
+    private Integer videoId;
 
-    private String cover;
+    private Double position;
 
-    private String source;
-
-    private Integer status;
+    private Double progress;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
