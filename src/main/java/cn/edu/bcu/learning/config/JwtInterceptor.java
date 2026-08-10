@@ -12,6 +12,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class JwtInterceptor implements HandlerInterceptor {
 
     public static final String USER_ID_ATTR = "userId";
+    public static final String USER_ROLE_ATTR = "userRole";
 
     private final JwtUtil jwtUtil;
 
@@ -30,7 +31,9 @@ public class JwtInterceptor implements HandlerInterceptor {
         try {
             String token = authHeader.substring(7);
             Integer userId = jwtUtil.getUserId(token);
+            String role = jwtUtil.getRole(token);
             request.setAttribute(USER_ID_ATTR, userId);
+            request.setAttribute(USER_ROLE_ATTR, role);
             return true;
         } catch (Exception e) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

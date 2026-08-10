@@ -1,5 +1,6 @@
 package cn.edu.bcu.learning.controller;
 
+import cn.edu.bcu.learning.annotation.RequireRole;
 import cn.edu.bcu.learning.domain.dto.EnrollRequest;
 import cn.edu.bcu.learning.domain.dto.SwitchCourseRequest;
 import cn.edu.bcu.learning.domain.entity.Course;
@@ -125,6 +126,7 @@ public class CourseController {
         return Result.success(result);
     }
 
+    @RequireRole("teacher")
     @PostMapping("/add")
     public Result<Course> addCourse(@RequestBody Map<String, String> body) {
         String name = body.get("name");

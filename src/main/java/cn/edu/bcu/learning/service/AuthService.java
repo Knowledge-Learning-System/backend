@@ -43,7 +43,7 @@ public class AuthService {
         }
 
         LoginVO loginVO = new LoginVO();
-        loginVO.setToken(jwtUtil.generateToken(user.getId(), user.getUsername()));
+        loginVO.setToken(jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole()));
         loginVO.setUser(UserConverter.toVO(user));
         return loginVO;
     }

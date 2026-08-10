@@ -1,5 +1,6 @@
 package cn.edu.bcu.learning.controller;
 
+import cn.edu.bcu.learning.annotation.RequireRole;
 import cn.edu.bcu.learning.domain.dto.CreateHomeworkRequest;
 import cn.edu.bcu.learning.domain.entity.HomeworkSubmission;
 import cn.edu.bcu.learning.domain.vo.HomeworkSubmissionVO;
@@ -18,12 +19,14 @@ public class HomeworkController {
     private HomeworkService homeworkService;
 
     /** 创建作业 — POST /homework */
+    @RequireRole("teacher")
     @PostMapping
     public HomeworkVO create(@RequestBody CreateHomeworkRequest request) {
         return null; // TODO
     }
 
     /** 发布作业 — PUT /homework/{id}/publish */
+    @RequireRole("teacher")
     @PutMapping("/{id}/publish")
     public void publish(@PathVariable Long id) {
         homeworkService.publishHomework(id);
@@ -49,12 +52,14 @@ public class HomeworkController {
     }
 
     /** 查看提交列表 — GET /homework/{id}/submissions */
+    @RequireRole("teacher")
     @GetMapping("/{id}/submissions")
     public List<HomeworkSubmissionVO> submissions(@PathVariable Long id) {
         return homeworkService.getSubmissionsByHomework(id);
     }
 
     /** 评分+反馈 — PUT /homework/submission/{id}/grade */
+    @RequireRole("teacher")
     @PutMapping("/submission/{id}/grade")
     public void grade(@PathVariable Long id,
                       @RequestParam Integer score,

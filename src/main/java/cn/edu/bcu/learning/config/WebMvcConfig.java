@@ -11,6 +11,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final JwtInterceptor jwtInterceptor;
+    private final RoleInterceptor roleInterceptor;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
@@ -31,6 +32,13 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/auth/register",
                         "/resources/videos/stream",
                         "/resources/courseware/download"
+                );
+        registry.addInterceptor(roleInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns(
+                        "/health",
+                        "/auth/login",
+                        "/auth/register"
                 );
     }
 }
