@@ -24,4 +24,8 @@ public class UserBehaviorService {
         ub.setAction(action);
         userBehaviorMapper.insert(ub);
     }
+
+    public int getActiveDays(Integer userId) {
+        return userBehaviorMapper.countActiveDays(userId);
+    }
 }

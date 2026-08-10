@@ -1,11 +1,13 @@
 package cn.edu.bcu.learning.service;
 
 import cn.edu.bcu.learning.domain.entity.Course;
+import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
 import cn.edu.bcu.learning.domain.entity.User;
 import cn.edu.bcu.learning.domain.entity.UserCourse;
 import cn.edu.bcu.learning.domain.vo.CourseVO;
 import cn.edu.bcu.learning.domain.vo.MyCourseVO;
 import cn.edu.bcu.learning.repository.mysql.CourseMapper;
+import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
 import cn.edu.bcu.learning.repository.mysql.UserCourseMapper;
 import cn.edu.bcu.learning.repository.mysql.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -25,6 +27,7 @@ public class CourseService {
     private final CourseMapper courseMapper;
     private final UserCourseMapper userCourseMapper;
     private final UserMapper userMapper;
+    private final KnowledgeMasteryMapper knowledgeMasteryMapper;
 
     public List<CourseVO> listCourses() {
         return courseMapper.selectList(new LambdaQueryWrapper<Course>()
@@ -54,10 +57,26 @@ public class CourseService {
             }
             MyCourseVO vo = new MyCourseVO();
             BeanUtils.copyProperties(toCourseVO(course), vo);
-            vo.setProgress(userCourse.getProgress() == null ? 0 : userCourse.getProgress());
+            vo.setProgress(calculateCourseProgress(userId, userCourse.getCourseId()));
             result.add(vo);
         }
         return result;
+    }
+
+    /**
+     * 动态计算用户在某课程的进度（0-100）。
+     * 基于该用户在该课程所有知识点的 KnowledgeMastery.masteryLevel 平均值。
+     */
+    public int calculateCourseProgress(Integer userId, Integer courseId) {
+        List<KnowledgeMastery> masteryList = knowledgeMasteryMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeMastery>()
+                        .eq(KnowledgeMastery::getUserId, userId)
+                        .eq(KnowledgeMastery::getCourseId, courseId));
+        if (masteryList.isEmpty()) {
+            return 0;
+        }
+        int sum = masteryList.stream().mapToInt(KnowledgeMastery::getMasteryLevel).sum();
+        return sum / masteryList.size();
     }
 
     public void enroll(Integer userId, Integer courseId) {
@@ -90,11 +109,55 @@ public class CourseService {
         userMapper.updateById(user);
     }
 
+    public void unenroll(Integer userId, Integer courseId) {
+        int deleted = userCourseMapper.delete(new LambdaQueryWrapper<UserCourse>()
+                .eq(UserCourse::getUserId, userId)
+                .eq(UserCourse::getCourseId, courseId));
+        if (deleted == 0) {
+            throw new RuntimeException("未加入该课程");
+        }
+    }
+
     public Course getCourseById(Integer courseId) {
         Course course = courseMapper.selectById(courseId);
         if (course == null) {
             throw new RuntimeException("课程不存在");
         }
+        return course;
+    }
+
+    /**
+     * 添加课程，courseCode 自动递增（cs1001, cs1002...）
+     */
+    public Course addCourse(String name, String description, String cover, String source) {
+        // 查询当前最大的 courseCode
+        LambdaQueryWrapper<Course> wrapper = new LambdaQueryWrapper<Course>()
+                .isNotNull(Course::getCourseCode)
+                .orderByDesc(Course::getCourseCode)
+                .last("LIMIT 1");
+        List<Course> list = courseMapper.selectList(wrapper);
+
+        String newCode;
+        if (list == null || list.isEmpty()) {
+            newCode = "cs1001";
+        } else {
+            String maxCode = list.get(0).getCourseCode();
+            // 提取数字部分
+            String numPart = maxCode.replaceAll("[^0-9]", "");
+            int nextNum = Integer.parseInt(numPart) + 1;
+            // 提取前缀
+            String prefix = maxCode.replaceAll("[0-9]", "");
+            newCode = prefix + nextNum;
+        }
+
+        Course course = new Course();
+        course.setName(name);
+        course.setDescription(description);
+        course.setCover(cover);
+        course.setSource(source);
+        course.setCourseCode(newCode);
+        course.setStatus(1);
+        courseMapper.insert(course);
         return course;
     }
 

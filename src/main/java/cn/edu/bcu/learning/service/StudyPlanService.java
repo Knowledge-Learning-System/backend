@@ -1,10 +1,14 @@
 package cn.edu.bcu.learning.service;
 
+import cn.edu.bcu.learning.domain.dto.CreateStudyPlanRequest;
+import cn.edu.bcu.learning.domain.dto.UpdateStudyPlanRequest;
 import cn.edu.bcu.learning.domain.entity.Course;
 import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
+import cn.edu.bcu.learning.domain.entity.StudyPlan;
 import cn.edu.bcu.learning.domain.entity.UserAnswerRecord;
 import cn.edu.bcu.learning.domain.vo.*;
 import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
+import cn.edu.bcu.learning.repository.mysql.StudyPlanMapper;
 import cn.edu.bcu.learning.repository.mysql.UserAnswerRecordMapper;
 import cn.edu.bcu.learning.repository.neo4j.KnowledgeGraphRepository;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -45,6 +49,10 @@ public class StudyPlanService {
                 .map(KnowledgeMastery::getKnowledgePointId)
                 .collect(Collectors.toSet());
 
+        // 构建掌握度查找表（包含所有知识点，未掌握的为0）
+        Map<String, Integer> masteryMap = masteries.stream()
+                .collect(Collectors.toMap(KnowledgeMastery::getKnowledgePointId, KnowledgeMastery::getMasteryLevel, (a, b) -> a));
+
         List<RecommendationVO> result = new ArrayList<>();
         for (LearningPathItemVO item : path) {
             if (mastered.contains(item.getId())) continue;
@@ -57,7 +65,16 @@ public class StudyPlanService {
                 String reason = mastered.isEmpty()
                         ? "学习路径起点"
                         : "前置知识点已掌握，可以开始学习";
-                result.add(new RecommendationVO(item.getId(), item.getName(), item.getDescription(), reason));
+                int mastery = masteryMap.getOrDefault(item.getId(), 0);
+                List<String> prereqNames = item.getPrerequisites() == null ? Collections.emptyList() :
+                        item.getPrerequisites().stream()
+                                .map(prereqId -> knowledgeGraphRepository.findDetailById(prereqId)
+                                        .map(KnowledgePointDetailVO::getName)
+                                        .orElse(prereqId))
+                                .collect(Collectors.toList());
+                result.add(new RecommendationVO(
+                        item.getId(), item.getName(), item.getDescription(), reason,
+                        prereqNames, mastery));
                 if (result.size() >= 5) break; // 最多推荐5个
             }
         }
@@ -140,5 +157,97 @@ public class StudyPlanService {
         // 按错误次数降序
         result.sort((a, b) -> Integer.compare(b.getErrorCount(), a.getErrorCount()));
         return result;
+    }
+
+    // ========== 学习计划 CRUD ==========
+
+    public StudyPlanVO createPlan(Integer userId, CreateStudyPlanRequest request) {
+        if (request.getEndDate() != null && request.getStartDate() != null
+                && !request.getEndDate().isAfter(request.getStartDate())) {
+            throw new RuntimeException("结束日期必须大于开始日期");
+        }
+
+        // 同一用户同一课程不允许重复创建活跃计划
+        Long existing = studyPlanMapper.selectCount(
+                new LambdaQueryWrapper<StudyPlan>()
+                        .eq(StudyPlan::getUserId, userId)
+                        .eq(StudyPlan::getCourseId, request.getCourseId()));
+        if (existing != null && existing > 0) {
+            throw new RuntimeException("该课程已有学习计划，请先删除或修改");
+        }
+
+        StudyPlan plan = new StudyPlan();
+        plan.setUserId(userId);
+        plan.setCourseId(request.getCourseId());
+        plan.setStartDate(request.getStartDate());
+        plan.setEndDate(request.getEndDate());
+        plan.setDailyHours(request.getDailyHours());
+        studyPlanMapper.insert(plan);
+
+        return toPlanVO(plan);
+    }
+
+    public StudyPlanVO updatePlan(Integer userId, Integer planId, UpdateStudyPlanRequest request) {
+        StudyPlan plan = studyPlanMapper.selectById(planId);
+        if (plan == null || !plan.getUserId().equals(userId)) {
+            throw new RuntimeException("学习计划不存在或无权修改");
+        }
+
+        if (request.getEndDate() != null && request.getStartDate() != null
+                && !request.getEndDate().isAfter(request.getStartDate())) {
+            throw new RuntimeException("结束日期必须大于开始日期");
+        }
+
+        if (request.getStartDate() != null) plan.setStartDate(request.getStartDate());
+        if (request.getEndDate() != null) plan.setEndDate(request.getEndDate());
+        if (request.getDailyHours() != null) plan.setDailyHours(request.getDailyHours());
+        studyPlanMapper.updateById(plan);
+
+        return toPlanVO(plan);
+    }
+
+    public boolean deletePlan(Integer userId, Integer planId) {
+        StudyPlan plan = studyPlanMapper.selectById(planId);
+        if (plan == null || !plan.getUserId().equals(userId)) {
+            return false;
+        }
+        studyPlanMapper.deleteById(planId);
+        return true;
+    }
+
+    public List<StudyPlanVO> getMyPlans(Integer userId, Integer courseId) {
+        LambdaQueryWrapper<StudyPlan> wrapper = new LambdaQueryWrapper<StudyPlan>()
+                .eq(StudyPlan::getUserId, userId)
+                .eq(courseId != null, StudyPlan::getCourseId, courseId)
+                .orderByDesc(StudyPlan::getCreateTime);
+        List<StudyPlan> plans = studyPlanMapper.selectList(wrapper);
+        return plans.stream().map(this::toPlanVO).collect(Collectors.toList());
+    }
+
+    public StudyPlanVO getPlan(Integer userId, Integer planId) {
+        StudyPlan plan = studyPlanMapper.selectById(planId);
+        if (plan == null || !plan.getUserId().equals(userId)) {
+            return null;
+        }
+        return toPlanVO(plan);
+    }
+
+    private StudyPlanVO toPlanVO(StudyPlan plan) {
+        StudyPlanVO vo = new StudyPlanVO();
+        vo.setId(plan.getId());
+        vo.setUserId(plan.getUserId());
+        vo.setCourseId(plan.getCourseId());
+        vo.setStartDate(plan.getStartDate());
+        vo.setEndDate(plan.getEndDate());
+        vo.setDailyHours(plan.getDailyHours());
+        vo.setCreateTime(plan.getCreateTime());
+
+        try {
+            Course course = courseService.getCourseById(plan.getCourseId());
+            vo.setCourseName(course.getName());
+        } catch (Exception e) {
+            vo.setCourseName("未知课程");
+        }
+        return vo;
     }
 }

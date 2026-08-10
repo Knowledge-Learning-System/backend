@@ -5,24 +5,24 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("course")
-public class Course {
+@TableName("homework")
+public class Homework {
 
     @TableId(type = IdType.AUTO)
-    private Integer id;
+    private Long id;
 
-    private String name;
+    private Long courseId;
+
+    private Long knowledgePointId;
+
+    private String title;
 
     private String description;
 
-    private String cover;
+    private LocalDateTime deadline;
 
-    private String source;
-
-    private Integer status;
-
-    /** 课程编号，格式 cs1001、cs1002...自动递增 */
-    private String courseCode;
+    /** draft / published / closed */
+    private String status;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

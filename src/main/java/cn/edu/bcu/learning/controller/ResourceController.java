@@ -1,12 +1,15 @@
 package cn.edu.bcu.learning.controller;
 
 import cn.edu.bcu.learning.domain.entity.CoursewareResource;
+import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
 import cn.edu.bcu.learning.domain.entity.VideoResource;
 import cn.edu.bcu.learning.domain.vo.ResourceSearchResultVO;
+import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
 import cn.edu.bcu.learning.service.ResourceService;
 import cn.edu.bcu.learning.utils.Result;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.*;
@@ -14,21 +17,23 @@ import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/resources")
 public class ResourceController {
 
     private final ResourceService resourceService;
+    private final KnowledgeMasteryMapper knowledgeMasteryMapper;
 
     @Value("${resource.base-path}")
     private String basePath;
 
-    public ResourceController(ResourceService resourceService) {
+    public ResourceController(ResourceService resourceService, KnowledgeMasteryMapper knowledgeMasteryMapper) {
         this.resourceService = resourceService;
+        this.knowledgeMasteryMapper = knowledgeMasteryMapper;
     }
 
     @GetMapping("/videos")
@@ -92,6 +97,43 @@ public class ResourceController {
              FileInputStream fis = new FileInputStream(file)) {
             fis.transferTo(os);
         }
+    }
+
+    @PostMapping("/courseware/access")
+    public Result<?> trackCoursewareAccess(
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        String knowledgePointId = (String) body.get("knowledgePointId");
+        Integer courseId = body.get("courseId") != null ? ((Number) body.get("courseId")).intValue() : null;
+
+        if (knowledgePointId == null || knowledgePointId.isEmpty()) {
+            return Result.success();
+        }
+
+        LambdaQueryWrapper<KnowledgeMastery> kmWrapper = new LambdaQueryWrapper<KnowledgeMastery>()
+                .eq(KnowledgeMastery::getUserId, userId)
+                .eq(KnowledgeMastery::getKnowledgePointId, knowledgePointId);
+        if (courseId != null) {
+            kmWrapper.eq(KnowledgeMastery::getCourseId, courseId);
+        }
+        KnowledgeMastery km = knowledgeMasteryMapper.selectOne(kmWrapper);
+        if (km == null) {
+            km = new KnowledgeMastery();
+            km.setUserId(userId);
+            km.setKnowledgePointId(knowledgePointId);
+            km.setCourseId(courseId);
+            km.setMasteryLevel(20);
+            km.setTotalAttempts(0);
+            km.setCorrectAttempts(0);
+            km.setLastAttemptTime(LocalDateTime.now());
+            knowledgeMasteryMapper.insert(km);
+        } else if (km.getMasteryLevel() != null && km.getMasteryLevel() < 20) {
+            km.setMasteryLevel(20);
+            km.setLastAttemptTime(LocalDateTime.now());
+            knowledgeMasteryMapper.updateById(km);
+        }
+        return Result.success();
     }
 
     private File resolveFile(String path) {

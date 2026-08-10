@@ -5,24 +5,25 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("course")
-public class Course {
+@TableName("discussion")
+public class Discussion {
 
     @TableId(type = IdType.AUTO)
     private Integer id;
 
-    private String name;
+    private Integer courseId;
 
-    private String description;
+    private Integer videoId;
 
-    private String cover;
+    private String knowledgePointId;
 
-    private String source;
+    private Integer userId;
 
-    private Integer status;
+    private String title;
 
-    /** 课程编号，格式 cs1001、cs1002...自动递增 */
-    private String courseCode;
+    private String content;
+
+    private Integer replyCount;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

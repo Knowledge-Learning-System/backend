@@ -2,27 +2,26 @@ package cn.edu.bcu.learning.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("course")
-public class Course {
+@TableName("study_plan")
+public class StudyPlan {
 
     @TableId(type = IdType.AUTO)
     private Integer id;
 
-    private String name;
+    private Integer userId;
 
-    private String description;
+    private Integer courseId;
 
-    private String cover;
+    private LocalDate startDate;
 
-    private String source;
+    private LocalDate endDate;
 
-    private Integer status;
-
-    /** 课程编号，格式 cs1001、cs1002...自动递增 */
-    private String courseCode;
+    /** 每日学习小时数 */
+    private java.math.BigDecimal dailyHours;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

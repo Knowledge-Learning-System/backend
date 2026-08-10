@@ -60,6 +60,21 @@ public class CourseController {
         return Result.success();
     }
 
+    @DeleteMapping("/enroll/{courseId}")
+    public Result<?> unenroll(@PathVariable Integer courseId, HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        courseService.unenroll(userId, courseId);
+        return Result.success();
+    }
+
+    // 课程进度（动态计算，基于 KnowledgeMastery）
+    @GetMapping("/{courseId}/progress")
+    public Result<?> getCourseProgress(@PathVariable Integer courseId, HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        int progress = courseService.calculateCourseProgress(userId, courseId);
+        return Result.success().setData(Map.of("progress", progress));
+    }
+
     // 学习路径导航
     @GetMapping("/{courseId}/learning-path")
     public Result<List<LearningPathItemVO>> getLearningPath(@PathVariable Integer courseId) {
@@ -108,5 +123,18 @@ public class CourseController {
         }
 
         return Result.success(result);
+    }
+
+    @PostMapping("/add")
+    public Result<Course> addCourse(@RequestBody Map<String, String> body) {
+        String name = body.get("name");
+        String description = body.get("description");
+        String cover = body.get("cover");
+        String source = body.get("source");
+        if (name == null || name.isBlank()) {
+            return Result.fail("课程名称不能为空");
+        }
+        Course course = courseService.addCourse(name, description, cover, source);
+        return Result.success(course);
     }
 }
