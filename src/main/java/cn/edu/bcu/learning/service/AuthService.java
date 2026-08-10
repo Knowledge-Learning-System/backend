@@ -31,7 +31,8 @@ public class AuthService {
         User user = new User();
         user.setUsername(request.getUsername());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setRole("student");
+        user.setRole(request.getRole() != null && !request.getRole().isEmpty()
+                ? request.getRole() : "student");
         userMapper.insert(user);
     }
 
