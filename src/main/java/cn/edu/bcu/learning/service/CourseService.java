@@ -161,6 +161,32 @@ public class CourseService {
         return course;
     }
 
+    /** 编辑课程（教师端）— PUT /courses/{courseId} */
+    public Course updateCourse(Integer courseId, Map<String, String> body) {
+        Course course = getCourseById(courseId);
+        if (body.containsKey("name")) {
+            course.setName(body.get("name"));
+        }
+        if (body.containsKey("description")) {
+            course.setDescription(body.get("description"));
+        }
+        if (body.containsKey("cover")) {
+            course.setCover(body.get("cover"));
+        }
+        if (body.containsKey("source")) {
+            course.setSource(body.get("source"));
+        }
+        courseMapper.updateById(course);
+        return course;
+    }
+
+    /** 删除课程（教师端，软删除 status=0）— DELETE /courses/{courseId} */
+    public void deleteCourse(Integer courseId) {
+        Course course = getCourseById(courseId);
+        course.setStatus(0);
+        courseMapper.updateById(course);
+    }
+
     private CourseVO toCourseVO(Course course) {
         CourseVO vo = new CourseVO();
         vo.setId(course.getId());

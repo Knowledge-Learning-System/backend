@@ -8,5 +8,6 @@ public class UserVO {
     private String username;
     private String role;
     private String avatar;
+    private String nickname;
     private Integer currentCourseId;
 }

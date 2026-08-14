@@ -4,16 +4,23 @@ import cn.edu.bcu.learning.domain.entity.CoursewareResource;
 import cn.edu.bcu.learning.domain.entity.VideoResource;
 import cn.edu.bcu.learning.domain.vo.ResourceSearchResultVO;
 import cn.edu.bcu.learning.repository.mysql.CoursewareResourceMapper;
+import cn.edu.bcu.learning.repository.mysql.ResourceChunkMapper;
 import cn.edu.bcu.learning.repository.mysql.VideoResourceMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +28,8 @@ public class ResourceService {
 
     private final VideoResourceMapper videoResourceMapper;
     private final CoursewareResourceMapper coursewareResourceMapper;
+    private final ResourceChunkMapper resourceChunkMapper;
+    private final RagService ragService;
 
     public List<VideoResource> getVideos(Integer courseId, String knowledgePointId) {
         LambdaQueryWrapper<VideoResource> wrapper = new LambdaQueryWrapper<VideoResource>()
@@ -109,5 +118,67 @@ public class ResourceService {
         List<ResourceSearchResultVO.ResourceItem> pageList = allItems.subList(fromIndex, toIndex);
 
         return new ResourceSearchResultVO(pageList, total, page, pageSize);
+    }
+
+    /** 上传学习资料（教师端）— POST /resources/upload */
+    public CoursewareResource uploadCourseware(Integer courseId, String knowledgePointId,
+                                               String title, MultipartFile file, String basePath) {
+        if (file == null || file.isEmpty()) {
+            throw new RuntimeException("上传文件不能为空");
+        }
+        String originalName = file.getOriginalFilename();
+        String ext = "";
+        if (originalName != null && originalName.contains(".")) {
+            ext = originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase();
+        }
+
+        String dir = basePath + File.separator + "courseware";
+        File directory = new File(dir);
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new RuntimeException("创建存储目录失败：" + dir);
+        }
+
+        String storedName = UUID.randomUUID().toString().replace("-", "") + (ext.isEmpty() ? "" : "." + ext);
+        File target = new File(directory, storedName);
+        try {
+            file.transferTo(target);
+        } catch (IOException e) {
+            throw new RuntimeException("文件保存失败：" + e.getMessage(), e);
+        }
+
+        CoursewareResource resource = new CoursewareResource();
+        resource.setCourseId(courseId);
+        resource.setKnowledgePointId(knowledgePointId);
+        resource.setTitle(title != null && !title.isBlank() ? title : originalName);
+        resource.setFilePath("courseware/" + storedName);
+        resource.setFileType(ext);
+        coursewareResourceMapper.insert(resource);
+        // 解析正文并向量化写入 resource_chunk，供 AI 检索（失败不影响上传）
+        ragService.indexResource(resource, target);
+        return resource;
+    }
+
+    /** 存量课件补 RAG 索引：清空 resource_chunk 后全量重建。 */
+    public Map<String, Object> reindexAllCourseware(String basePath) {
+        resourceChunkMapper.delete(new LambdaQueryWrapper<>());
+        List<CoursewareResource> all = coursewareResourceMapper.selectList(null);
+        int total = all.size();
+        int success = 0;
+        int missing = 0;
+        for (CoursewareResource r : all) {
+            File f = new File(basePath, r.getFilePath());
+            if (f.exists()) {
+                ragService.indexResource(r, f);
+                success++;
+            } else {
+                missing++;
+            }
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("total", total);
+        result.put("success", success);
+        result.put("fileMissing", missing);
+        result.put("chunks", resourceChunkMapper.selectCount(null));
+        return result;
     }
 }

@@ -9,4 +9,6 @@ public class AiChatResponseVO {
     private String reply;
 
     private List<String> sources;
+
+    private List<FunctionEntryVO> functions;
 }

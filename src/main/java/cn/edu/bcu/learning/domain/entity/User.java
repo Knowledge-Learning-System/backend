@@ -19,6 +19,8 @@ public class User {
 
     private String avatar;
 
+    private String nickname;
+
     private Integer currentCourseId;
 
     @TableField(fill = FieldFill.INSERT)

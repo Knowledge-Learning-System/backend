@@ -9,6 +9,8 @@ public class DiscussionReplyVO {
     private Integer discussionId;
     private Integer userId;
     private String username;
+    private String nickname;
+    private String role;
     private Integer replyToId;
     private String replyToUsername;
     private String content;

@@ -1,6 +1,8 @@
 package cn.edu.bcu.learning.service;
 
+import cn.edu.bcu.learning.domain.dto.CreateQuestionRequest;
 import cn.edu.bcu.learning.domain.dto.SubmitAnswerRequest;
+import cn.edu.bcu.learning.domain.dto.UpdateQuestionRequest;
 import cn.edu.bcu.learning.domain.entity.Course;
 import cn.edu.bcu.learning.domain.entity.Question;
 import cn.edu.bcu.learning.domain.entity.UserAnswerRecord;
@@ -122,6 +124,45 @@ public class QuestionService {
         result.setCorrectCount(correctCount);
         result.setItems(itemResults);
         return result;
+    }
+
+    /** 新增题目（教师端）— POST /questions */
+    public Question createQuestion(CreateQuestionRequest request) {
+        Question question = new Question();
+        question.setCourseId(request.getCourseId());
+        question.setKnowledgePointId(request.getKnowledgePointId());
+        question.setType(request.getType());
+        question.setContent(request.getContent());
+        question.setOptions(request.getOptions());
+        question.setAnswer(request.getAnswer());
+        question.setAnalysis(request.getAnalysis());
+        questionMapper.insert(question);
+        return question;
+    }
+
+    /** 编辑题目（教师端）— PUT /questions/{id} */
+    public Question updateQuestion(Integer id, UpdateQuestionRequest request) {
+        Question question = questionMapper.selectById(id);
+        if (question == null) {
+            throw new RuntimeException("题目不存在");
+        }
+        question.setCourseId(request.getCourseId());
+        question.setKnowledgePointId(request.getKnowledgePointId());
+        question.setType(request.getType());
+        question.setContent(request.getContent());
+        question.setOptions(request.getOptions());
+        question.setAnswer(request.getAnswer());
+        question.setAnalysis(request.getAnalysis());
+        questionMapper.updateById(question);
+        return question;
+    }
+
+    /** 删除题目（教师端）— DELETE /questions/{id} */
+    public void deleteQuestion(Integer id) {
+        int deleted = questionMapper.deleteById(id);
+        if (deleted == 0) {
+            throw new RuntimeException("题目不存在");
+        }
     }
 
     private SubmitAnswerResultVO.ItemResult buildItemResult(Integer qid, boolean isCorrect, String answer, String analysis) {

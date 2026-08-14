@@ -43,6 +43,10 @@ public class Result<T> implements Serializable {
         return restResult(ResponseCodeEnum.FAILED.getCode(), ResponseCodeEnum.FAILED.getMsg());
     }
 
+    public static <T> Result<T> fail(String msg) {
+        return restResult(ResponseCodeEnum.FAILED.getCode(), msg);
+    }
+
     public static <T> Result<T> custom(ResponseCodeEnum responseCode) {
         return restResult(responseCode.getCode(), responseCode.getMsg());
     }

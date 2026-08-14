@@ -14,6 +14,7 @@ public final class UserConverter {
         vo.setUsername(user.getUsername());
         vo.setRole(user.getRole());
         vo.setAvatar(user.getAvatar());
+        vo.setNickname(user.getNickname());
         vo.setCurrentCourseId(user.getCurrentCourseId());
         return vo;
     }

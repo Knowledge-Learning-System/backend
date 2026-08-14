@@ -5,9 +5,9 @@ import lombok.Data;
 @Data
 public class UpdateQuestionRequest {
 
-    private Long courseId;
+    private Integer courseId;
 
-    private Long knowledgePointId;
+    private String knowledgePointId;
 
     private String type;
 

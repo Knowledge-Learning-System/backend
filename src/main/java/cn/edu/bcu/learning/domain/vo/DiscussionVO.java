@@ -12,6 +12,8 @@ public class DiscussionVO {
     private String knowledgePointId;
     private Integer userId;
     private String username;
+    private String nickname;
+    private String role;
     private String title;
     private String content;
     private Integer replyCount;

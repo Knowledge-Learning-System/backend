@@ -34,3 +34,9 @@ logging:
 jwt:
   secret: knowledge-learning-jwt-secret-key-2026
   expiration: 604800000
+
+# 千问 DashScope API 配置
+qwen:
+  api-key: sk-ws-H.EERMPRL.th6L.MEYCIQCXFAKFQ-Zq3W1bVATJa3FgUSk-lE9llpEcmdwlKiJ7HgIhAKuF-1EnZxYLcsa4j8MNr13v0rxuqCUFKYEUOGm2Z6Ji
+  model: qwen-plus
+  base-url: https://dashscope.aliyuncs.com/compatible-mode/v1

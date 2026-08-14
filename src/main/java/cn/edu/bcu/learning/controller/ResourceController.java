@@ -1,5 +1,6 @@
 package cn.edu.bcu.learning.controller;
 
+import cn.edu.bcu.learning.annotation.RequireRole;
 import cn.edu.bcu.learning.domain.entity.CoursewareResource;
 import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
 import cn.edu.bcu.learning.domain.entity.VideoResource;
@@ -13,6 +14,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.net.URLEncoder;
@@ -134,6 +136,23 @@ public class ResourceController {
             knowledgeMasteryMapper.updateById(km);
         }
         return Result.success();
+    }
+
+    /** 上传学习资料（教师端）— POST /resources/upload */
+    @RequireRole("teacher")
+    @PostMapping("/upload")
+    public Result<CoursewareResource> upload(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(required = false) Integer courseId,
+            @RequestParam(required = false) String knowledgePointId,
+            @RequestParam(required = false) String title) {
+        return Result.success(resourceService.uploadCourseware(courseId, knowledgePointId, title, file, basePath));
+    }
+
+    /** 存量课件补 RAG 索引 — POST /resources/reindex（运维接口） */
+    @PostMapping("/reindex")
+    public Result<Map<String, Object>> reindex() {
+        return Result.success(resourceService.reindexAllCourseware(basePath));
     }
 
     private File resolveFile(String path) {

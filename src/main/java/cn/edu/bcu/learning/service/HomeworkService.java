@@ -22,8 +22,18 @@ public class HomeworkService {
     private HomeworkSubmissionMapper homeworkSubmissionMapper;
 
     public Homework createHomework(CreateHomeworkRequest request) {
-        // TODO
-        return null;
+        if (request.getTitle() == null || request.getTitle().isBlank()) {
+            throw new RuntimeException("作业标题不能为空");
+        }
+        Homework homework = new Homework();
+        homework.setCourseId(request.getCourseId());
+        homework.setKnowledgePointId(request.getKnowledgePointId());
+        homework.setTitle(request.getTitle());
+        homework.setDescription(request.getDescription());
+        homework.setDeadline(request.getDeadline());
+        homework.setStatus("draft");
+        homeworkMapper.insert(homework);
+        return homework;
     }
 
     public void publishHomework(Long homeworkId) {

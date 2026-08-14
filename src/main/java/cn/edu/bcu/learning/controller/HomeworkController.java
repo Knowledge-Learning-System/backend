@@ -2,10 +2,13 @@ package cn.edu.bcu.learning.controller;
 
 import cn.edu.bcu.learning.annotation.RequireRole;
 import cn.edu.bcu.learning.domain.dto.CreateHomeworkRequest;
+import cn.edu.bcu.learning.domain.entity.Homework;
 import cn.edu.bcu.learning.domain.entity.HomeworkSubmission;
 import cn.edu.bcu.learning.domain.vo.HomeworkSubmissionVO;
 import cn.edu.bcu.learning.domain.vo.HomeworkVO;
 import cn.edu.bcu.learning.service.HomeworkService;
+import cn.edu.bcu.learning.utils.Result;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,8 +24,12 @@ public class HomeworkController {
     /** 创建作业 — POST /homework */
     @RequireRole("teacher")
     @PostMapping
-    public HomeworkVO create(@RequestBody CreateHomeworkRequest request) {
-        return null; // TODO
+    public Result<HomeworkVO> create(@RequestBody CreateHomeworkRequest request) {
+        Homework homework = homeworkService.createHomework(request);
+        HomeworkVO vo = new HomeworkVO();
+        BeanUtils.copyProperties(homework, vo);
+        vo.setSubmissionCount(0);
+        return Result.success(vo);
     }
 
     /** 发布作业 — PUT /homework/{id}/publish */

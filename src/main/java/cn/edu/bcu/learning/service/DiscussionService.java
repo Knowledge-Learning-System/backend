@@ -10,6 +10,7 @@ import cn.edu.bcu.learning.domain.vo.DiscussionVO;
 import cn.edu.bcu.learning.repository.mysql.DiscussionMapper;
 import cn.edu.bcu.learning.repository.mysql.DiscussionReplyMapper;
 import cn.edu.bcu.learning.repository.mysql.UserMapper;
+import cn.edu.bcu.learning.utils.SensitiveWordFilter;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -28,6 +29,7 @@ public class DiscussionService {
     private final DiscussionMapper discussionMapper;
     private final DiscussionReplyMapper replyMapper;
     private final UserMapper userMapper;
+    private final SensitiveWordFilter sensitiveWordFilter;
 
     public DiscussionVO createDiscussion(Integer userId, CreateDiscussionRequest request) {
         Discussion d = new Discussion();
@@ -35,8 +37,8 @@ public class DiscussionService {
         d.setVideoId(request.getVideoId());
         d.setKnowledgePointId(request.getKnowledgePointId());
         d.setUserId(userId);
-        d.setTitle(request.getTitle());
-        d.setContent(request.getContent());
+        d.setTitle(sensitiveWordFilter.filter(request.getTitle()));
+        d.setContent(sensitiveWordFilter.filter(request.getContent()));
         d.setReplyCount(0);
         discussionMapper.insert(d);
         return toVO(d, null);
@@ -68,7 +70,8 @@ public class DiscussionService {
 
     public boolean deleteDiscussion(Integer userId, Integer id) {
         Discussion d = discussionMapper.selectById(id);
-        if (d == null || !d.getUserId().equals(userId)) return false;
+        if (d == null) return false;
+        if (!d.getUserId().equals(userId) && !isTeacher(userId)) return false;
 
         LambdaQueryWrapper<DiscussionReply> rw = new LambdaQueryWrapper<DiscussionReply>()
                 .eq(DiscussionReply::getDiscussionId, id);
@@ -83,7 +86,7 @@ public class DiscussionService {
         r.setDiscussionId(discussionId);
         r.setUserId(userId);
         r.setReplyToId(request.getReplyToId());
-        r.setContent(request.getContent());
+        r.setContent(sensitiveWordFilter.filter(request.getContent()));
         replyMapper.insert(r);
 
         Long count = replyMapper.selectCount(
@@ -100,7 +103,8 @@ public class DiscussionService {
 
     public boolean deleteReply(Integer userId, Integer replyId) {
         DiscussionReply r = replyMapper.selectById(replyId);
-        if (r == null || !r.getUserId().equals(userId)) return false;
+        if (r == null) return false;
+        if (!r.getUserId().equals(userId) && !isTeacher(userId)) return false;
         replyMapper.deleteById(replyId);
 
         Long count = replyMapper.selectCount(
@@ -128,23 +132,11 @@ public class DiscussionService {
 
         User u = userMapper.selectById(d.getUserId());
         vo.setUsername(u != null ? u.getUsername() : "未知用户");
+        vo.setNickname(u != null ? u.getNickname() : null);
+        vo.setRole(u != null ? u.getRole() : null);
 
         if (replies != null) {
-            Map<Integer, String> userMap = replies.stream()
-                    .map(r -> r.getUserId())
-                    .distinct()
-                    .collect(Collectors.toMap(uid -> uid, uid -> {
-                        User u2 = userMapper.selectById(uid);
-                        return u2 != null ? u2.getUsername() : "未知用户";
-                    }));
-            vo.setReplies(replies.stream().map(r -> {
-                DiscussionReplyVO rv = toReplyVO(r);
-                rv.setUsername(userMap.getOrDefault(r.getUserId(), "未知用户"));
-                if (r.getReplyToId() != null) {
-                    rv.setReplyToUsername(userMap.getOrDefault(r.getReplyToId(), "未知用户"));
-                }
-                return rv;
-            }).collect(Collectors.toList()));
+            vo.setReplies(replies.stream().map(this::toReplyVO).collect(Collectors.toList()));
         } else {
             vo.setReplies(new ArrayList<>());
         }
@@ -159,6 +151,21 @@ public class DiscussionService {
         vo.setReplyToId(r.getReplyToId());
         vo.setContent(r.getContent());
         vo.setCreateTime(r.getCreateTime());
+
+        User u = userMapper.selectById(r.getUserId());
+        vo.setUsername(u != null ? u.getUsername() : "未知用户");
+        vo.setNickname(u != null ? u.getNickname() : null);
+        vo.setRole(u != null ? u.getRole() : null);
+
+        if (r.getReplyToId() != null) {
+            User rt = userMapper.selectById(r.getReplyToId());
+            vo.setReplyToUsername(rt != null ? rt.getUsername() : "未知用户");
+        }
         return vo;
+    }
+
+    private boolean isTeacher(Integer userId) {
+        User u = userMapper.selectById(userId);
+        return u != null && "teacher".equals(u.getRole());
     }
 }

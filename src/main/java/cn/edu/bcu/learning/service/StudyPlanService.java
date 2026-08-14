@@ -27,6 +27,7 @@ public class StudyPlanService {
     private final KnowledgeGraphRepository knowledgeGraphRepository;
     private final KnowledgeMasteryMapper knowledgeMasteryMapper;
     private final UserAnswerRecordMapper userAnswerRecordMapper;
+    private final StudyPlanMapper studyPlanMapper;
     private final CourseService courseService;
 
     /**

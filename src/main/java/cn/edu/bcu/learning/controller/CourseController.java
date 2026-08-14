@@ -139,4 +139,22 @@ public class CourseController {
         Course course = courseService.addCourse(name, description, cover, source);
         return Result.success(course);
     }
+
+    /** 编辑课程（教师端）— PUT /courses/{courseId} */
+    @RequireRole("teacher")
+    @PutMapping("/{courseId}")
+    public Result<Course> updateCourse(@PathVariable Integer courseId, @RequestBody Map<String, String> body) {
+        if (body.containsKey("name") && (body.get("name") == null || body.get("name").isBlank())) {
+            return Result.fail("课程名称不能为空");
+        }
+        return Result.success(courseService.updateCourse(courseId, body));
+    }
+
+    /** 删除课程（教师端，软删除）— DELETE /courses/{courseId} */
+    @RequireRole("teacher")
+    @DeleteMapping("/{courseId}")
+    public Result<Void> deleteCourse(@PathVariable Integer courseId) {
+        courseService.deleteCourse(courseId);
+        return Result.success();
+    }
 }

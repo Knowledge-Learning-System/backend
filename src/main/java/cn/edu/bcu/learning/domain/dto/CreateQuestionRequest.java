@@ -5,9 +5,9 @@ import lombok.Data;
 @Data
 public class CreateQuestionRequest {
 
-    private Long courseId;
+    private Integer courseId;
 
-    private Long knowledgePointId;
+    private String knowledgePointId;
 
     /** single / multiple */
     private String type;
