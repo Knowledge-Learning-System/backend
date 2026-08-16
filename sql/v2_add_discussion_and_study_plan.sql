@@ -1,7 +1,7 @@
 -- 讨论区主表
 CREATE TABLE IF NOT EXISTS discussion (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    course_id INT NOT NULL,
+    course_id INT,
     video_id INT,
     knowledge_point_id VARCHAR(255),
     user_id INT NOT NULL,
