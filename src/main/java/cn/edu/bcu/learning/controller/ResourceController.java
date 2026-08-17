@@ -138,14 +138,18 @@ public class ResourceController {
         return Result.success();
     }
 
-    /** 上传学习资料（教师端）— POST /resources/upload */
+    /** 上传学习资料（教师端）— POST /resources/upload，type=video 上传视频，type=courseware 上传课件 */
     @RequireRole("teacher")
     @PostMapping("/upload")
-    public Result<CoursewareResource> upload(
+    public Result<?> upload(
             @RequestParam("file") MultipartFile file,
             @RequestParam(required = false) Integer courseId,
             @RequestParam(required = false) String knowledgePointId,
-            @RequestParam(required = false) String title) {
+            @RequestParam(required = false) String title,
+            @RequestParam(defaultValue = "courseware") String type) {
+        if ("video".equals(type)) {
+            return Result.success(resourceService.uploadVideo(courseId, knowledgePointId, title, file, basePath));
+        }
         return Result.success(resourceService.uploadCourseware(courseId, knowledgePointId, title, file, basePath));
     }
 

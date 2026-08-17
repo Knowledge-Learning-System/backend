@@ -158,6 +158,41 @@ public class ResourceService {
         return resource;
     }
 
+    /** 上传视频（教师端）— POST /resources/upload type=video */
+    public VideoResource uploadVideo(Integer courseId, String knowledgePointId,
+                                     String title, MultipartFile file, String basePath) {
+        if (file == null || file.isEmpty()) {
+            throw new RuntimeException("上传文件不能为空");
+        }
+        String originalName = file.getOriginalFilename();
+        String ext = "";
+        if (originalName != null && originalName.contains(".")) {
+            ext = originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase();
+        }
+
+        String dir = basePath + File.separator + "videos";
+        File directory = new File(dir);
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new RuntimeException("创建存储目录失败：" + dir);
+        }
+
+        String storedName = UUID.randomUUID().toString().replace("-", "") + (ext.isEmpty() ? "" : "." + ext);
+        File target = new File(directory, storedName);
+        try {
+            file.transferTo(target);
+        } catch (IOException e) {
+            throw new RuntimeException("文件保存失败：" + e.getMessage(), e);
+        }
+
+        VideoResource resource = new VideoResource();
+        resource.setCourseId(courseId);
+        resource.setKnowledgePointId(knowledgePointId);
+        resource.setTitle(title != null && !title.isBlank() ? title : originalName);
+        resource.setFilePath("videos/" + storedName);
+        videoResourceMapper.insert(resource);
+        return resource;
+    }
+
     /** 存量课件补 RAG 索引：清空 resource_chunk 后全量重建。 */
     public Map<String, Object> reindexAllCourseware(String basePath) {
         resourceChunkMapper.delete(new LambdaQueryWrapper<>());
