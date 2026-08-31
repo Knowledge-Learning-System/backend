@@ -23,6 +23,12 @@ public class StudyPlan {
     /** 每日学习小时数 */
     private java.math.BigDecimal dailyHours;
 
+    /** 每日学习目标（分钟） */
+    private Integer dailyTarget;
+
+    /** 每日提醒时间 HH:mm */
+    private String remindTime;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 

@@ -1,10 +1,12 @@
 package cn.edu.bcu.learning.controller;
 
 import cn.edu.bcu.learning.annotation.RequireRole;
+import cn.edu.bcu.learning.domain.entity.Course;
 import cn.edu.bcu.learning.domain.entity.CoursewareResource;
 import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
 import cn.edu.bcu.learning.domain.entity.VideoResource;
 import cn.edu.bcu.learning.domain.vo.ResourceSearchResultVO;
+import cn.edu.bcu.learning.repository.mysql.CourseMapper;
 import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
 import cn.edu.bcu.learning.service.ResourceService;
 import cn.edu.bcu.learning.utils.Result;
@@ -29,13 +31,15 @@ public class ResourceController {
 
     private final ResourceService resourceService;
     private final KnowledgeMasteryMapper knowledgeMasteryMapper;
+    private final CourseMapper courseMapper;
 
     @Value("${resource.base-path}")
     private String basePath;
 
-    public ResourceController(ResourceService resourceService, KnowledgeMasteryMapper knowledgeMasteryMapper) {
+    public ResourceController(ResourceService resourceService, KnowledgeMasteryMapper knowledgeMasteryMapper, CourseMapper courseMapper) {
         this.resourceService = resourceService;
         this.knowledgeMasteryMapper = knowledgeMasteryMapper;
+        this.courseMapper = courseMapper;
     }
 
     @GetMapping("/videos")
@@ -146,7 +150,19 @@ public class ResourceController {
             @RequestParam(required = false) Integer courseId,
             @RequestParam(required = false) String knowledgePointId,
             @RequestParam(required = false) String title,
-            @RequestParam(defaultValue = "courseware") String type) {
+            @RequestParam(defaultValue = "courseware") String type,
+            HttpServletRequest request) {
+        // 归属校验：传入 courseId 时，仅该课程的负责教师可上传资源
+        if (courseId != null) {
+            Integer userId = (Integer) request.getAttribute("userId");
+            Course course = courseMapper.selectById(courseId);
+            if (course == null) {
+                return Result.fail("课程不存在");
+            }
+            if (course.getTeacherId() != null && !course.getTeacherId().equals(userId)) {
+                return Result.fail("您无权为该课程上传资源");
+            }
+        }
         if ("video".equals(type)) {
             return Result.success(resourceService.uploadVideo(courseId, knowledgePointId, title, file, basePath));
         }

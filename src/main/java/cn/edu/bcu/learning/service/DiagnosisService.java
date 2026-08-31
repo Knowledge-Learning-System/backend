@@ -27,6 +27,7 @@ public class DiagnosisService {
     private final KnowledgeMasteryMapper knowledgeMasteryMapper;
     private final KnowledgeGraphRepository knowledgeGraphRepository;
     private final CourseService courseService;
+    private final CognitiveDiagnosisService cognitiveDiagnosisService;
 
     /**
      * 根据答题记录计算所有知识点的掌握度，写入 knowledge_mastery 表。
@@ -82,52 +83,63 @@ public class DiagnosisService {
     }
 
     /**
-     * 雷达图数据：所有知识点的掌握度列表
+     * 雷达图数据：基于 DINA 认知诊断估计各知识点掌握概率（0-100）
      */
     public List<RadarItemVO> getRadar(Integer userId, String source) {
         List<String> kpIds = knowledgeGraphRepository.findAllKpIdsBySource(source);
         if (kpIds.isEmpty()) return Collections.emptyList();
 
-        List<KnowledgeMastery> masteries = knowledgeMasteryMapper.selectList(
-                new LambdaQueryWrapper<KnowledgeMastery>()
-                        .eq(KnowledgeMastery::getUserId, userId)
-                        .in(KnowledgeMastery::getKnowledgePointId, kpIds));
-
-        Map<String, Integer> masteryMap = masteries.stream()
-                .collect(Collectors.toMap(KnowledgeMastery::getKnowledgePointId, KnowledgeMastery::getMasteryLevel));
+        List<UserAnswerRecord> records = userAnswerRecordMapper.selectList(
+                new LambdaQueryWrapper<UserAnswerRecord>()
+                        .eq(UserAnswerRecord::getUserId, userId)
+                        .in(UserAnswerRecord::getKnowledgePointId, kpIds));
+        Map<String, Double> probMap = cognitiveDiagnosisService.estimate(records);
 
         List<RadarItemVO> result = new ArrayList<>();
         for (String kpId : kpIds) {
             String name = knowledgeGraphRepository.findDetailById(kpId)
                     .map(KnowledgePointDetailVO::getName)
                     .orElse(kpId);
-            result.add(new RadarItemVO(kpId, name, masteryMap.getOrDefault(kpId, 0)));
+            double p = probMap.getOrDefault(kpId, 0.0);
+            result.add(new RadarItemVO(kpId, name, (int) Math.round(p * 100)));
         }
         return result;
     }
 
     /**
-     * 薄弱点查询：掌握度 < 60 或答题错误率 > 40%
+     * 薄弱点查询：认知诊断掌握度 < 60 或答题错误率 > 40%
      */
     public List<WeakPointVO> getWeakPoints(Integer userId, String source) {
         List<String> kpIds = knowledgeGraphRepository.findAllKpIdsBySource(source);
         if (kpIds.isEmpty()) return Collections.emptyList();
 
-        List<KnowledgeMastery> masteries = knowledgeMasteryMapper.selectList(
-                new LambdaQueryWrapper<KnowledgeMastery>()
-                        .eq(KnowledgeMastery::getUserId, userId)
-                        .in(KnowledgeMastery::getKnowledgePointId, kpIds));
+        List<UserAnswerRecord> records = userAnswerRecordMapper.selectList(
+                new LambdaQueryWrapper<UserAnswerRecord>()
+                        .eq(UserAnswerRecord::getUserId, userId)
+                        .in(UserAnswerRecord::getKnowledgePointId, kpIds));
+        Map<String, Double> probMap = cognitiveDiagnosisService.estimate(records);
+        Map<String, Integer> totalMap = new HashMap<>();
+        Map<String, Integer> errorMap = new HashMap<>();
+        for (UserAnswerRecord r : records) {
+            if (r.getKnowledgePointId() == null) continue;
+            totalMap.merge(r.getKnowledgePointId(), 1, Integer::sum);
+            if (!Boolean.TRUE.equals(r.getIsCorrect())) {
+                errorMap.merge(r.getKnowledgePointId(), 1, Integer::sum);
+            }
+        }
 
         List<WeakPointVO> result = new ArrayList<>();
-        for (KnowledgeMastery km : masteries) {
-            if (km.getMasteryLevel() == null || km.getMasteryLevel() >= 60) continue;
+        for (Map.Entry<String, Double> e : probMap.entrySet()) {
+            String kpId = e.getKey();
+            int mastery = (int) Math.round(e.getValue() * 100);
+            if (mastery >= 60) continue;
 
-            String name = knowledgeGraphRepository.findDetailById(km.getKnowledgePointId())
+            String name = knowledgeGraphRepository.findDetailById(kpId)
                     .map(KnowledgePointDetailVO::getName)
-                    .orElse(km.getKnowledgePointId());
-            int errorCount = km.getTotalAttempts() - km.getCorrectAttempts();
-            result.add(new WeakPointVO(km.getKnowledgePointId(), name, km.getMasteryLevel(),
-                    km.getTotalAttempts(), errorCount));
+                    .orElse(kpId);
+            int total = totalMap.getOrDefault(kpId, 0);
+            int errors = errorMap.getOrDefault(kpId, 0);
+            result.add(new WeakPointVO(kpId, name, mastery, total, errors));
         }
         return result;
     }

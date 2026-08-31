@@ -41,8 +41,9 @@ public class HomeworkController {
 
     /** 作业列表 — GET /homework?courseId= */
     @GetMapping
-    public List<HomeworkVO> list(@RequestParam Long courseId) {
-        return homeworkService.listHomeworkByCourse(courseId);
+    public List<HomeworkVO> list(@RequestParam Long courseId,
+                                 @RequestAttribute(required = false) Long userId) {
+        return homeworkService.listHomeworkByCourse(courseId, userId);
     }
 
     /** 作业详情 — GET /homework/{id} */

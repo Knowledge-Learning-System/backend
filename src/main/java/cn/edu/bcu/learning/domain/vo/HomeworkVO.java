@@ -22,5 +22,10 @@ public class HomeworkVO {
 
     private Integer submissionCount;
 
+    /** 当前用户在该作业的评分（学生端展示） */
+    private Integer myScore;
+
+    private String myFeedback;
+
     private LocalDateTime createTime;
 }

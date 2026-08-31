@@ -2,6 +2,7 @@ package cn.edu.bcu.learning.controller;
 
 import cn.edu.bcu.learning.domain.dto.CreateStudyPlanRequest;
 import cn.edu.bcu.learning.domain.dto.UpdateStudyPlanRequest;
+import cn.edu.bcu.learning.domain.vo.AnswerDetailVO;
 import cn.edu.bcu.learning.domain.vo.LearningPathItemVO;
 import cn.edu.bcu.learning.domain.vo.RecommendationVO;
 import cn.edu.bcu.learning.domain.vo.ReminderVO;
@@ -78,5 +79,26 @@ public class StudyPlanController {
     public Result<List<StudyPlanVO>> getMyPlans(@RequestParam(required = false) Integer courseId) {
         Integer userId = ThreadLocalUtil.getUserId();
         return Result.success(studyPlanService.getMyPlans(userId, courseId));
+    }
+
+    /**
+     * 记录当天学习（视频播放结束触发）
+     */
+    @PostMapping("/record")
+    public Result<?> recordStudy(@RequestBody Map<String, Object> body) {
+        Integer userId = ThreadLocalUtil.getUserId();
+        Integer courseId = body.get("courseId") == null ? 0 : Integer.valueOf(body.get("courseId").toString());
+        String knowledgePointId = body.get("knowledgePointId") == null ? null : body.get("knowledgePointId").toString();
+        studyPlanService.recordStudy(userId, courseId, knowledgePointId);
+        return Result.success();
+    }
+
+    /**
+     * 今日测试：从当天学习过的章节随机抽 5 道题
+     */
+    @GetMapping("/daily-quiz")
+    public Result<List<AnswerDetailVO>> getDailyQuiz(@RequestParam Integer courseId) {
+        Integer userId = ThreadLocalUtil.getUserId();
+        return Result.success(studyPlanService.getDailyQuiz(userId, courseId));
     }
 }

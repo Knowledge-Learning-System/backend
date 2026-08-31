@@ -24,6 +24,9 @@ public class Course {
     /** 课程编号，格式 cs1001、cs1002...自动递增 */
     private String courseCode;
 
+    /** 负责教师ID（课程分配给指定教师，仅该教师可上传学习资源） */
+    private Integer teacherId;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 

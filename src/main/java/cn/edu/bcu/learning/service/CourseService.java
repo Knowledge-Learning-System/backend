@@ -37,6 +37,16 @@ public class CourseService {
                 .collect(Collectors.toList());
     }
 
+    /** 教师"我的课程"：按 course.teacher_id 返回该教师负责的课程列表 */
+    public List<CourseVO> listTeachingCourses(Integer teacherId) {
+        return courseMapper.selectList(new LambdaQueryWrapper<Course>()
+                        .eq(Course::getTeacherId, teacherId)
+                        .eq(Course::getStatus, 1))
+                .stream()
+                .map(this::toCourseVO)
+                .collect(Collectors.toList());
+    }
+
     public List<MyCourseVO> listMyCourses(Integer userId) {
         List<UserCourse> userCourses = userCourseMapper.selectList(new LambdaQueryWrapper<UserCourse>()
                 .eq(UserCourse::getUserId, userId));
@@ -129,7 +139,7 @@ public class CourseService {
     /**
      * 添加课程，courseCode 自动递增（cs1001, cs1002...）
      */
-    public Course addCourse(String name, String description, String cover, String source) {
+    public Course addCourse(String name, String description, String cover, String source, Integer teacherId) {
         // 查询当前最大的 courseCode
         LambdaQueryWrapper<Course> wrapper = new LambdaQueryWrapper<Course>()
                 .isNotNull(Course::getCourseCode)
@@ -155,6 +165,7 @@ public class CourseService {
         course.setDescription(description);
         course.setCover(cover);
         course.setSource(source);
+        course.setTeacherId(teacherId);
         course.setCourseCode(newCode);
         course.setStatus(1);
         courseMapper.insert(course);

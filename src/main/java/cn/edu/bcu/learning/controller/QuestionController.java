@@ -8,11 +8,13 @@ import cn.edu.bcu.learning.domain.entity.Course;
 import cn.edu.bcu.learning.domain.entity.Question;
 import cn.edu.bcu.learning.domain.vo.AnswerDetailVO;
 import cn.edu.bcu.learning.domain.vo.SubmitAnswerResultVO;
+import cn.edu.bcu.learning.repository.mysql.CourseMapper;
 import cn.edu.bcu.learning.service.CourseService;
 import cn.edu.bcu.learning.service.DiagnosisService;
 import cn.edu.bcu.learning.service.QuestionService;
 import cn.edu.bcu.learning.service.UserBehaviorService;
 import cn.edu.bcu.learning.utils.Result;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,6 +29,7 @@ public class QuestionController {
     private final DiagnosisService diagnosisService;
     private final UserBehaviorService userBehaviorService;
     private final CourseService courseService;
+    private final CourseMapper courseMapper;
 
     @GetMapping
     public Result<List<AnswerDetailVO>> getQuestions(
@@ -49,8 +52,19 @@ public class QuestionController {
     /** 新增题目（教师端）— POST /questions */
     @RequireRole("teacher")
     @PostMapping
-    public Result<Question> create(@RequestBody CreateQuestionRequest request) {
-        return Result.success(questionService.createQuestion(request));
+    public Result<Question> create(@RequestBody CreateQuestionRequest req, HttpServletRequest servletRequest) {
+        // 归属校验：仅该课程的负责教师可添加试题
+        if (req.getCourseId() != null) {
+            Integer userId = (Integer) servletRequest.getAttribute("userId");
+            Course course = courseMapper.selectById(req.getCourseId());
+            if (course == null) {
+                return Result.fail("课程不存在");
+            }
+            if (course.getTeacherId() != null && !course.getTeacherId().equals(userId)) {
+                return Result.fail("您无权为该课程添加试题");
+            }
+        }
+        return Result.success(questionService.createQuestion(req));
     }
 
     /** 编辑题目（教师端）— PUT /questions/{id} */

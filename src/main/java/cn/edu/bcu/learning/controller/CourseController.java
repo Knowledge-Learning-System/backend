@@ -47,6 +47,14 @@ public class CourseController {
         return Result.success().setData(courseService.listMyCourses(userId));
     }
 
+    /** 教师"我的课程"（按 course.teacher_id 归属）— GET /courses/my-teaching */
+    @RequireRole("teacher")
+    @GetMapping("/my-teaching")
+    public Result<List<CourseVO>> listMyTeachingCourses(HttpServletRequest request) {
+        Integer userId = (Integer) request.getAttribute("userId");
+        return Result.success(courseService.listTeachingCourses(userId));
+    }
+
     @PostMapping("/enroll")
     public Result<?> enroll(@RequestBody EnrollRequest enrollRequest, HttpServletRequest request) {
         Integer userId = (Integer) request.getAttribute("userId");
@@ -128,7 +136,7 @@ public class CourseController {
 
     @RequireRole("teacher")
     @PostMapping("/add")
-    public Result<Course> addCourse(@RequestBody Map<String, String> body) {
+    public Result<Course> addCourse(@RequestBody Map<String, String> body, HttpServletRequest request) {
         String name = body.get("name");
         String description = body.get("description");
         String cover = body.get("cover");
@@ -136,7 +144,8 @@ public class CourseController {
         if (name == null || name.isBlank()) {
             return Result.fail("课程名称不能为空");
         }
-        Course course = courseService.addCourse(name, description, cover, source);
+        Integer teacherId = (Integer) request.getAttribute("userId");
+        Course course = courseService.addCourse(name, description, cover, source, teacherId);
         return Result.success(course);
     }
 

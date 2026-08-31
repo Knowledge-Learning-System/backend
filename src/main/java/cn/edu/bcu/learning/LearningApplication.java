@@ -5,8 +5,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @EnableAsync
+@EnableScheduling
 @SpringBootApplication(scanBasePackages = "cn.edu.bcu.learning")
 @ComponentScan(basePackages = {"cn.edu.bcu.learning"})
 @MapperScan("cn.edu.bcu.learning.repository.mysql")

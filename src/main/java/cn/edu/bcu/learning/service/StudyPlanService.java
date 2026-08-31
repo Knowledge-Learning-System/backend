@@ -3,10 +3,12 @@ package cn.edu.bcu.learning.service;
 import cn.edu.bcu.learning.domain.dto.CreateStudyPlanRequest;
 import cn.edu.bcu.learning.domain.dto.UpdateStudyPlanRequest;
 import cn.edu.bcu.learning.domain.entity.Course;
+import cn.edu.bcu.learning.domain.entity.DailyStudyRecord;
 import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
 import cn.edu.bcu.learning.domain.entity.StudyPlan;
 import cn.edu.bcu.learning.domain.entity.UserAnswerRecord;
 import cn.edu.bcu.learning.domain.vo.*;
+import cn.edu.bcu.learning.repository.mysql.DailyStudyRecordMapper;
 import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
 import cn.edu.bcu.learning.repository.mysql.StudyPlanMapper;
 import cn.edu.bcu.learning.repository.mysql.UserAnswerRecordMapper;
@@ -15,6 +17,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -28,58 +31,17 @@ public class StudyPlanService {
     private final KnowledgeMasteryMapper knowledgeMasteryMapper;
     private final UserAnswerRecordMapper userAnswerRecordMapper;
     private final StudyPlanMapper studyPlanMapper;
+    private final DailyStudyRecordMapper dailyStudyRecordMapper;
     private final CourseService courseService;
+    private final QuestionService questionService;
+    private final AnalysisAlgorithmService analysisAlgorithmService;
 
     /**
-     * 个性化推荐：拓扑排序中，前置已满足（掌握度 >= 60）的下一节点。
+     * 个性化推荐：综合打分排序（先修满足度 + 难度权重 + 掌握度接近阈值），
+     * 由 AnalysisAlgorithmService.recommendLearningPath 实现。
      */
     public List<RecommendationVO> getRecommendations(Integer userId, Integer courseId) {
-        Course course = courseService.getCourseById(courseId);
-        String source = course.getSource();
-
-        List<LearningPathItemVO> path = knowledgeGraphRepository.findLearningPathBySource(source);
-        if (path.isEmpty()) return Collections.emptyList();
-
-        // 获取已掌握的知识点
-        List<KnowledgeMastery> masteries = knowledgeMasteryMapper.selectList(
-                new LambdaQueryWrapper<KnowledgeMastery>()
-                        .eq(KnowledgeMastery::getUserId, userId)
-                        .eq(KnowledgeMastery::getCourseId, courseId));
-        Set<String> mastered = masteries.stream()
-                .filter(m -> m.getMasteryLevel() != null && m.getMasteryLevel() >= 60)
-                .map(KnowledgeMastery::getKnowledgePointId)
-                .collect(Collectors.toSet());
-
-        // 构建掌握度查找表（包含所有知识点，未掌握的为0）
-        Map<String, Integer> masteryMap = masteries.stream()
-                .collect(Collectors.toMap(KnowledgeMastery::getKnowledgePointId, KnowledgeMastery::getMasteryLevel, (a, b) -> a));
-
-        List<RecommendationVO> result = new ArrayList<>();
-        for (LearningPathItemVO item : path) {
-            if (mastered.contains(item.getId())) continue;
-
-            // 检查前置是否全部满足
-            boolean prereqsMet = item.getPrerequisites() == null || item.getPrerequisites().isEmpty()
-                    || mastered.containsAll(item.getPrerequisites());
-
-            if (prereqsMet) {
-                String reason = mastered.isEmpty()
-                        ? "学习路径起点"
-                        : "前置知识点已掌握，可以开始学习";
-                int mastery = masteryMap.getOrDefault(item.getId(), 0);
-                List<String> prereqNames = item.getPrerequisites() == null ? Collections.emptyList() :
-                        item.getPrerequisites().stream()
-                                .map(prereqId -> knowledgeGraphRepository.findDetailById(prereqId)
-                                        .map(KnowledgePointDetailVO::getName)
-                                        .orElse(prereqId))
-                                .collect(Collectors.toList());
-                result.add(new RecommendationVO(
-                        item.getId(), item.getName(), item.getDescription(), reason,
-                        prereqNames, mastery));
-                if (result.size() >= 5) break; // 最多推荐5个
-            }
-        }
-        return result;
+        return analysisAlgorithmService.recommendLearningPath(userId.longValue(), courseId.longValue());
     }
 
     /**
@@ -183,6 +145,8 @@ public class StudyPlanService {
         plan.setStartDate(request.getStartDate());
         plan.setEndDate(request.getEndDate());
         plan.setDailyHours(request.getDailyHours());
+        plan.setDailyTarget(request.getDailyTarget());
+        plan.setRemindTime(request.getRemindTime());
         studyPlanMapper.insert(plan);
 
         return toPlanVO(plan);
@@ -202,6 +166,8 @@ public class StudyPlanService {
         if (request.getStartDate() != null) plan.setStartDate(request.getStartDate());
         if (request.getEndDate() != null) plan.setEndDate(request.getEndDate());
         if (request.getDailyHours() != null) plan.setDailyHours(request.getDailyHours());
+        if (request.getDailyTarget() != null) plan.setDailyTarget(request.getDailyTarget());
+        if (request.getRemindTime() != null) plan.setRemindTime(request.getRemindTime());
         studyPlanMapper.updateById(plan);
 
         return toPlanVO(plan);
@@ -241,6 +207,8 @@ public class StudyPlanService {
         vo.setStartDate(plan.getStartDate());
         vo.setEndDate(plan.getEndDate());
         vo.setDailyHours(plan.getDailyHours());
+        vo.setDailyTarget(plan.getDailyTarget());
+        vo.setRemindTime(plan.getRemindTime());
         vo.setCreateTime(plan.getCreateTime());
 
         try {
@@ -250,5 +218,51 @@ public class StudyPlanService {
             vo.setCourseName("未知课程");
         }
         return vo;
+    }
+
+    /**
+     * 记录当天学习（视频播放结束触发），按知识点维度记录，每天每个知识点一条。
+     */
+    public void recordStudy(Integer userId, Integer courseId, String knowledgePointId) {
+        if (knowledgePointId == null || knowledgePointId.isEmpty()) {
+            return;
+        }
+        LocalDate today = LocalDate.now();
+        Long count = dailyStudyRecordMapper.selectCount(
+                new LambdaQueryWrapper<DailyStudyRecord>()
+                        .eq(DailyStudyRecord::getUserId, userId)
+                        .eq(DailyStudyRecord::getKnowledgePointId, knowledgePointId)
+                        .eq(DailyStudyRecord::getStudyDate, today));
+        if (count != null && count > 0) {
+            return;
+        }
+        DailyStudyRecord record = new DailyStudyRecord();
+        record.setUserId(userId);
+        record.setCourseId(courseId);
+        record.setKnowledgePointId(knowledgePointId);
+        record.setStudyDate(today);
+        dailyStudyRecordMapper.insert(record);
+    }
+
+    /**
+     * 今日测试：从当天学习过的章节随机抽 5 道题。
+     */
+    public List<AnswerDetailVO> getDailyQuiz(Integer userId, Integer courseId) {
+        LocalDate today = LocalDate.now();
+        List<DailyStudyRecord> records = dailyStudyRecordMapper.selectList(
+                new LambdaQueryWrapper<DailyStudyRecord>()
+                        .eq(DailyStudyRecord::getUserId, userId)
+                        .eq(DailyStudyRecord::getCourseId, courseId)
+                        .eq(DailyStudyRecord::getStudyDate, today));
+        if (records.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> kpIds = records.stream()
+                .map(DailyStudyRecord::getKnowledgePointId)
+                .distinct()
+                .collect(Collectors.toList());
+        List<AnswerDetailVO> questions = questionService.getQuestionsByKpIds(courseId, kpIds);
+        Collections.shuffle(questions);
+        return questions.stream().limit(5).collect(Collectors.toList());
     }
 }
