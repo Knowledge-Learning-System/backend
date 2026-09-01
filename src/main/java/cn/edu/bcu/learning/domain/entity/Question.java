@@ -18,6 +18,9 @@ public class Question {
     /** single / multiple */
     private String type;
 
+    /** 题型细分：choice / judge / fill / subjective */
+    private String questionType;
+
     private String content;
 
     /** JSON: ["A.xxx","B.xxx","C.xxx","D.xxx"] */
@@ -25,6 +28,9 @@ public class Question {
 
     /** 正确答案，如 "A" */
     private String answer;
+
+    /** 参考答案（主观题使用，客观题可为空） */
+    private String answerText;
 
     private String analysis;
 

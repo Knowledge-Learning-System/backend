@@ -22,6 +22,15 @@ public class HomeworkSubmission {
 
     private Integer score;
 
+    /** AI 自动评分 0-100 */
+    private Integer autoScore;
+
+    /** 最终得分（人工复核后） */
+    private Integer finalScore;
+
+    /** 判分状态：pending / graded / confirmed */
+    private String gradeStatus;
+
     private String feedback;
 
     private LocalDateTime submitTime;
