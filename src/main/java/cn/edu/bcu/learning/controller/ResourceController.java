@@ -176,10 +176,17 @@ public class ResourceController {
     }
 
     private File resolveFile(String path) {
-        File file = new File(path);
+        // 统一路径分隔符：存量数据中 file_path 使用 Windows 反斜杠（如 "课件\\xxx.pdf"），
+        // 在 Linux 服务器上 \ 会被当作普通字符导致解析失败，这里规范化为 /。
+        String normalized = path != null ? path.replace('\\', '/') : "";
+        // 去除开头的斜杠，避免 new File(basePath, "/课件/xxx") 被当作绝对路径而丢失 basePath
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        File file = new File(normalized);
         if (file.isAbsolute() && file.exists()) {
             return file;
         }
-        return new File(basePath, path);
+        return new File(basePath, normalized);
     }
 }

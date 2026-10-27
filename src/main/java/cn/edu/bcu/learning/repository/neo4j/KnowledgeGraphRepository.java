@@ -297,4 +297,240 @@ public class KnowledgeGraphRepository {
         }
         return ids;
     }
+
+    // ==================== 教师端图谱表格导入：写入与全量查询 ====================
+
+    /**
+     * 查询某课程（source）下的全量图谱：KnowledgePoint / SubTopic / KnowledgeArea 节点，
+     * 以及 PART_OF / HAS_SUBTOPIC / BELONGS_TO / PARENT_KP / PREREQUISITE 全部关系。
+     * group 字段约定：KnowledgeArea=0（根）、SubTopic=1、KnowledgePoint 取原 group（默认 2）。
+     */
+    public KnowledgeGraphVO getFullGraphBySource(String source) {
+        KnowledgeGraphVO graph = new KnowledgeGraphVO();
+
+        Collection<Map<String, Object>> kpRows = neo4jClient.query("""
+                        MATCH (n:KnowledgePoint {source: $source})
+                        RETURN n.id AS id, n.name AS name, n.source AS source,
+                               coalesce(n.group, 2) AS `group`, coalesce(n.level, 0) AS level,
+                               n.description AS description
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+        Collection<Map<String, Object>> stRows = neo4jClient.query("""
+                        MATCH (n:SubTopic {source: $source})
+                        RETURN n.id AS id, n.name AS name, n.source AS source,
+                               coalesce(n.group, 1) AS `group`, coalesce(n.level, 0) AS level,
+                               n.description AS description
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+        Collection<Map<String, Object>> kaRows = neo4jClient.query("""
+                        MATCH (n:KnowledgeArea {source: $source})
+                        RETURN n.id AS id, n.name AS name, n.source AS source,
+                               coalesce(n.group, 0) AS `group`, coalesce(n.level, 0) AS level,
+                               n.description AS description
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+
+        for (Collection<Map<String, Object>> rows : Arrays.asList(kpRows, stRows, kaRows)) {
+            for (Map<String, Object> row : rows) {
+                GraphNodeVO node = new GraphNodeVO();
+                node.setId(String.valueOf(row.get("id")));
+                node.setName(String.valueOf(row.get("name")));
+                node.setCourseId(String.valueOf(row.get("source")));
+                node.setGroup(((Number) row.get("group")).intValue());
+                node.setLevel(((Number) row.get("level")).intValue());
+                node.setDescription(row.get("description") == null ? "" : String.valueOf(row.get("description")));
+                graph.getNodes().add(node);
+            }
+        }
+
+        Collection<Map<String, Object>> linkRows = neo4jClient.query("""
+                        MATCH (a {source: $source})-[r:PART_OF|HAS_SUBTOPIC|BELONGS_TO|PARENT_KP|PREREQUISITE]->(b {source: $source})
+                        RETURN a.id AS source, b.id AS target, type(r) AS type
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+        for (Map<String, Object> row : linkRows) {
+            GraphLinkVO link = new GraphLinkVO();
+            link.setSource(String.valueOf(row.get("source")));
+            link.setTarget(String.valueOf(row.get("target")));
+            link.setType(String.valueOf(row.get("type")));
+            graph.getLinks().add(link);
+        }
+        return graph;
+    }
+
+    /**
+     * 导出某课程（source）下全部节点行（含类型标签与父节点映射），供「下载当前课程图谱」Excel 使用。
+     * 返回的 Map 键：id / type / name / description / level / group / order / source / parentId / parentType。
+     */
+    public List<Map<String, Object>> exportNodeRowsBySource(String source) {
+        Collection<Map<String, Object>> nodeRows = neo4jClient.query("""
+                        MATCH (n {source: $source})
+                        RETURN n.id AS id, labels(n) AS labels, n.name AS name,
+                               n.description AS description, coalesce(n.level, 0) AS level,
+                               coalesce(n.group, 0) AS `group`, n.order AS `order`, n.source AS source
+                        ORDER BY n.id
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+
+        // 父节点映射：childId -> [parentId, parentType]（PART_OF / HAS_SUBTOPIC / PARENT_KP 取第一条）
+        Collection<Map<String, Object>> parentRows = neo4jClient.query("""
+                        MATCH (a {source: $source})-[r:PART_OF|HAS_SUBTOPIC|PARENT_KP]->(b {source: $source})
+                        RETURN a.id AS parentId, labels(a) AS parentLabels, b.id AS childId
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+        Map<String, String[]> parentMap = new HashMap<>();
+        for (Map<String, Object> row : parentRows) {
+            parentMap.putIfAbsent(String.valueOf(row.get("childId")), new String[]{
+                    String.valueOf(row.get("parentId")),
+                    firstLabel(row.get("parentLabels"))});
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : nodeRows) {
+            Map<String, Object> out = new HashMap<>();
+            out.put("id", row.get("id"));
+            out.put("type", firstLabel(row.get("labels")));
+            out.put("name", row.get("name"));
+            out.put("description", row.get("description") == null ? "" : row.get("description"));
+            out.put("level", row.get("level"));
+            out.put("group", row.get("group"));
+            out.put("order", row.get("order"));
+            out.put("source", row.get("source"));
+            String[] parent = parentMap.get(String.valueOf(row.get("id")));
+            out.put("parentId", parent == null ? "" : parent[0]);
+            out.put("parentType", parent == null ? "" : parent[1]);
+            result.add(out);
+        }
+        return result;
+    }
+
+    /**
+     * 导出某课程（source）下全部关系行（含端点类型标签），供「下载当前课程图谱」Excel 使用。
+     * 返回的 Map 键：sourceType / sourceId / targetType / targetId / type。
+     */
+    public List<Map<String, Object>> exportRelationRowsBySource(String source) {
+        Collection<Map<String, Object>> rows = neo4jClient.query("""
+                        MATCH (a {source: $source})-[r:PART_OF|HAS_SUBTOPIC|BELONGS_TO|PARENT_KP|PREREQUISITE]->(b {source: $source})
+                        RETURN labels(a) AS sourceLabels, a.id AS sourceId,
+                               labels(b) AS targetLabels, b.id AS targetId,
+                               type(r) AS type
+                        ORDER BY type(r), a.id, b.id
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> out = new HashMap<>();
+            out.put("sourceType", firstLabel(row.get("sourceLabels")));
+            out.put("sourceId", row.get("sourceId"));
+            out.put("targetType", firstLabel(row.get("targetLabels")));
+            out.put("targetId", row.get("targetId"));
+            out.put("type", row.get("type"));
+            result.add(out);
+        }
+        return result;
+    }
+
+    private String firstLabel(Object labels) {
+        if (labels instanceof List<?> list && !list.isEmpty()) {
+            return String.valueOf(list.get(0));
+        }
+        return "";
+    }
+
+    /**
+     * MERGE 幂等写入节点（创建或修改）。
+     *
+     * @param type 白名单校验后的节点标签（KnowledgePoint / SubTopic / KnowledgeArea）
+     */
+    public void upsertNode(String source, String type, String id, String name, String description,
+                           Integer level, Integer group, Integer order) {
+        String cypher = """
+                MERGE (n:`%s` {source: $source, id: $id})
+                SET n.name = $name,
+                    n.description = $description,
+                    n.level = $level,
+                    n.group = $group,
+                    n.order = $order
+                """.formatted(type);
+        neo4jClient.query(cypher)
+                .bind(source).to("source")
+                .bind(id).to("id")
+                .bind(name).to("name")
+                .bind(description == null ? "" : description).to("description")
+                .bind(level == null ? 0 : level).to("level")
+                .bind(group == null ? 0 : group).to("group")
+                .bind(order).to("order")
+                .run();
+    }
+
+    /**
+     * 删除节点（DETACH DELETE，级联删除其全部关系）。
+     */
+    public void deleteNode(String source, String type, String id) {
+        String cypher = "MATCH (n:`" + type + "` {source: $source, id: $id}) DETACH DELETE n";
+        neo4jClient.query(cypher)
+                .bind(source).to("source")
+                .bind(id).to("id")
+                .run();
+    }
+
+    /**
+     * MERGE 幂等写入关系（创建或修改）。
+     */
+    public void upsertRelation(String source, String sourceType, String sourceId,
+                               String targetType, String targetId, String relType) {
+        String cypher = """
+                MATCH (a:`%s` {source: $source, id: $sourceId})
+                MATCH (b:`%s` {source: $source, id: $targetId})
+                MERGE (a)-[:`%s`]->(b)
+                """.formatted(sourceType, targetType, relType);
+        neo4jClient.query(cypher)
+                .bind(source).to("source")
+                .bind(sourceId).to("sourceId")
+                .bind(targetId).to("targetId")
+                .run();
+    }
+
+    /**
+     * 删除指定两端与类型的关系。
+     */
+    public void deleteRelation(String source, String sourceType, String sourceId,
+                               String targetType, String targetId, String relType) {
+        String cypher = """
+                MATCH (a:`%s` {source: $source, id: $sourceId})-[r:`%s`]->(b:`%s` {source: $source, id: $targetId})
+                DELETE r
+                """.formatted(sourceType, relType, targetType);
+        neo4jClient.query(cypher)
+                .bind(source).to("source")
+                .bind(sourceId).to("sourceId")
+                .bind(targetId).to("targetId")
+                .run();
+    }
+
+    /**
+     * 判断节点是否存在（用于节点表 parentId 自动建关系时的类型推断）。
+     */
+    public boolean existsNode(String source, String type, String id) {
+        String cypher = "MATCH (n:`" + type + "` {source: $source, id: $id}) RETURN n.id AS id LIMIT 1";
+        Collection<Map<String, Object>> rows = neo4jClient.query(cypher)
+                .bind(source).to("source")
+                .bind(id).to("id")
+                .fetch()
+                .all();
+        return !rows.isEmpty();
+    }
 }

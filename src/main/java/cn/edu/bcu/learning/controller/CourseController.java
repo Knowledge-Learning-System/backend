@@ -55,6 +55,13 @@ public class CourseController {
         return Result.success(courseService.listTeachingCourses(userId));
     }
 
+    /** 管理员：所有教师及其负责课程（教师-课程分配）— GET /courses/teachers */
+    @RequireRole("admin")
+    @GetMapping("/teachers")
+    public Result<List<TeacherCourseVO>> listTeacherCourses() {
+        return Result.success(courseService.listTeacherCourses());
+    }
+
     @PostMapping("/enroll")
     public Result<?> enroll(@RequestBody EnrollRequest enrollRequest, HttpServletRequest request) {
         Integer userId = (Integer) request.getAttribute("userId");

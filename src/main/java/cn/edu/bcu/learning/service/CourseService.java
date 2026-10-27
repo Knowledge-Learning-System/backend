@@ -6,6 +6,8 @@ import cn.edu.bcu.learning.domain.entity.User;
 import cn.edu.bcu.learning.domain.entity.UserCourse;
 import cn.edu.bcu.learning.domain.vo.CourseVO;
 import cn.edu.bcu.learning.domain.vo.MyCourseVO;
+import cn.edu.bcu.learning.domain.vo.TeacherCourseItemVO;
+import cn.edu.bcu.learning.domain.vo.TeacherCourseVO;
 import cn.edu.bcu.learning.repository.mysql.CourseMapper;
 import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
 import cn.edu.bcu.learning.repository.mysql.UserCourseMapper;
@@ -16,6 +18,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -45,6 +48,44 @@ public class CourseService {
                 .stream()
                 .map(this::toCourseVO)
                 .collect(Collectors.toList());
+    }
+
+    /** 管理员"教师-课程分配"：返回所有教师（role=teacher）及其负责课程（course.teacher_id 关联） */
+    public List<TeacherCourseVO> listTeacherCourses() {
+        List<User> teachers = userMapper.selectList(new LambdaQueryWrapper<User>()
+                .eq(User::getRole, "teacher"));
+        if (teachers.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<Integer> teacherIds = teachers.stream().map(User::getId).toList();
+        Map<Integer, List<Course>> courseMap = courseMapper.selectList(new LambdaQueryWrapper<Course>()
+                        .in(Course::getTeacherId, teacherIds)
+                        .eq(Course::getStatus, 1))
+                .stream()
+                .collect(Collectors.groupingBy(Course::getTeacherId));
+
+        return teachers.stream().map(teacher -> {
+            TeacherCourseVO vo = new TeacherCourseVO();
+            vo.setTeacherId(teacher.getId());
+            vo.setTeacherUsername(teacher.getUsername());
+            vo.setTeacherName(teacher.getNickname() != null && !teacher.getNickname().isBlank()
+                    ? teacher.getNickname() : teacher.getUsername());
+
+            List<TeacherCourseItemVO> items = courseMap.getOrDefault(teacher.getId(), Collections.emptyList())
+                    .stream()
+                    .map(course -> {
+                        TeacherCourseItemVO item = new TeacherCourseItemVO();
+                        item.setId(course.getId());
+                        item.setName(course.getName());
+                        item.setCourseCode(course.getCourseCode());
+                        item.setSource(course.getSource());
+                        return item;
+                    })
+                    .collect(Collectors.toList());
+            vo.setCourses(items);
+            return vo;
+        }).collect(Collectors.toList());
     }
 
     public List<MyCourseVO> listMyCourses(Integer userId) {
@@ -125,6 +166,12 @@ public class CourseService {
                 .eq(UserCourse::getCourseId, courseId));
         if (deleted == 0) {
             throw new RuntimeException("未加入该课程");
+        }
+        // 若退掉的正是当前课程，同步清空用户的当前课程标记，保证页面左上角不再显示该课程
+        User user = userMapper.selectById(userId);
+        if (user != null && courseId.equals(user.getCurrentCourseId())) {
+            user.setCurrentCourseId(null);
+            userMapper.updateById(user);
         }
     }
 

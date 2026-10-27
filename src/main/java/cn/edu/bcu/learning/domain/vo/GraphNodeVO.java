@@ -10,4 +10,6 @@ public class GraphNodeVO {
     private Integer group;
     /** 在 PARENT_KP 树中的层级深度（0 为根） */
     private Integer level;
+    /** 节点描述（教师端全量图谱返回，供前端 tooltip 展示） */
+    private String description;
 }

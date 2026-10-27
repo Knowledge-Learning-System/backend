@@ -27,7 +27,8 @@ public class RoleInterceptor implements HandlerInterceptor {
         String requiredRole = annotation.value();
         String userRole = (String) request.getAttribute(JwtInterceptor.USER_ROLE_ATTR);
 
-        if (!requiredRole.equals(userRole)) {
+        // admin 拥有全部角色访问权（可访问 teacher 等角色接口）；admin 专属接口通过 @RequireRole("admin") 与普通教师隔离
+        if (!requiredRole.equals(userRole) && !"admin".equals(userRole)) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             return false;
         }
