@@ -3,11 +3,13 @@ package cn.edu.bcu.learning.controller;
 import cn.edu.bcu.learning.domain.dto.CreateStudyPlanRequest;
 import cn.edu.bcu.learning.domain.dto.UpdateStudyPlanRequest;
 import cn.edu.bcu.learning.domain.vo.AnswerDetailVO;
+import cn.edu.bcu.learning.domain.vo.FullStudyPlanVO;
 import cn.edu.bcu.learning.domain.vo.LearningPathItemVO;
 import cn.edu.bcu.learning.domain.vo.RecommendationVO;
 import cn.edu.bcu.learning.domain.vo.ReminderVO;
 import cn.edu.bcu.learning.domain.vo.StudyPlanVO;
 import cn.edu.bcu.learning.service.StudyPlanService;
+import cn.edu.bcu.learning.service.UserBehaviorService;
 import cn.edu.bcu.learning.utils.Result;
 import cn.edu.bcu.learning.utils.ThreadLocalUtil;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import java.util.Map;
 public class StudyPlanController {
 
     private final StudyPlanService studyPlanService;
+    private final UserBehaviorService userBehaviorService;
 
     /**
      * 个性化推荐：推荐下一个可学习节点
@@ -29,8 +32,9 @@ public class StudyPlanController {
     @GetMapping("/recommendations")
     public Result<List<RecommendationVO>> getRecommendations(
             @RequestParam Integer userId,
-            @RequestParam Integer courseId) {
-        return Result.success(studyPlanService.getRecommendations(userId, courseId));
+            @RequestParam Integer courseId,
+            @RequestParam(required = false) String kpId) {
+        return Result.success(studyPlanService.getRecommendations(userId, courseId, kpId));
     }
 
     /**
@@ -41,6 +45,32 @@ public class StudyPlanController {
             @RequestParam Integer userId,
             @RequestParam Integer courseId) {
         return Result.success(studyPlanService.getStudyPlan(userId, courseId));
+    }
+
+    /**
+     * 完整学习计划：按知识图谱 PREREQUISITE 依赖拓扑序生成全部学习步骤，
+     * 含依赖说明、完成状态（knowledge_mastery >= 60）与总进度。学生按当前课程获取。
+     */
+    @GetMapping("/full-plan")
+    public Result<FullStudyPlanVO> getFullPlan(@RequestParam Integer courseId) {
+        Integer userId = ThreadLocalUtil.getUserId();
+        return Result.success(studyPlanService.getFullPlan(userId, courseId));
+    }
+
+    /**
+     * 标记学习步骤完成/取消完成
+     * body: { courseId, kpId, completed }
+     * 落库 knowledge_mastery（完成置 100、取消置 0），并同步 user_course.progress。
+     */
+    @PostMapping("/plan/complete")
+    public Result<?> completePlanStep(@RequestBody Map<String, Object> body) {
+        Integer userId = ThreadLocalUtil.getUserId();
+        Integer courseId = body.get("courseId") == null ? 0 : Integer.valueOf(body.get("courseId").toString());
+        String kpId = body.get("kpId") == null ? null : body.get("kpId").toString();
+        boolean completed = body.get("completed") == null
+                || Boolean.parseBoolean(body.get("completed").toString());
+        studyPlanService.completePlanStep(userId, courseId, kpId, completed);
+        return Result.success();
     }
 
     /**
@@ -90,6 +120,25 @@ public class StudyPlanController {
         Integer courseId = body.get("courseId") == null ? 0 : Integer.valueOf(body.get("courseId").toString());
         String knowledgePointId = body.get("knowledgePointId") == null ? null : body.get("knowledgePointId").toString();
         studyPlanService.recordStudy(userId, courseId, knowledgePointId);
+        return Result.success();
+    }
+
+    /**
+     * 上报学习停留时长（功能3-学习时长采集）
+     * body: { durationSeconds: 本次累计秒, knowledgePointId?: 可选 }
+     * 以 action=study_time 落库 user_behavior，统计接口按 userId 聚合。
+     */
+    @PostMapping("/time")
+    public Result<?> recordStudyTime(@RequestBody Map<String, Object> body) {
+        Integer userId = ThreadLocalUtil.getUserId();
+        Integer durationSeconds = body.get("durationSeconds") == null ? 0
+                : Integer.valueOf(body.get("durationSeconds").toString());
+        String knowledgePointId = body.get("knowledgePointId") == null
+                ? null : body.get("knowledgePointId").toString();
+        if (durationSeconds == null || durationSeconds <= 0) {
+            return Result.success();
+        }
+        userBehaviorService.recordStudyTime(userId, knowledgePointId, durationSeconds);
         return Result.success();
     }
 

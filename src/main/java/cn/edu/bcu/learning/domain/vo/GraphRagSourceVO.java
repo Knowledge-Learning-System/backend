@@ -11,6 +11,8 @@ public class GraphRagSourceVO {
     private String id;
     /** 知识点名称 */
     private String name;
+    /** 所属课程 ID（用于前端跳转至课程章节） */
+    private Long courseId;
     /** 所属章节（KnowledgeArea / SubTopic） */
     private String chapter;
     /** 该知识点在回答中的角色（如：命中知识点/前置知识） */

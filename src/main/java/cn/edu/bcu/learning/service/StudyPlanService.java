@@ -7,11 +7,13 @@ import cn.edu.bcu.learning.domain.entity.DailyStudyRecord;
 import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
 import cn.edu.bcu.learning.domain.entity.StudyPlan;
 import cn.edu.bcu.learning.domain.entity.UserAnswerRecord;
+import cn.edu.bcu.learning.domain.entity.UserCourse;
 import cn.edu.bcu.learning.domain.vo.*;
 import cn.edu.bcu.learning.repository.mysql.DailyStudyRecordMapper;
 import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
 import cn.edu.bcu.learning.repository.mysql.StudyPlanMapper;
 import cn.edu.bcu.learning.repository.mysql.UserAnswerRecordMapper;
+import cn.edu.bcu.learning.repository.mysql.UserCourseMapper;
 import cn.edu.bcu.learning.repository.neo4j.KnowledgeGraphRepository;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -32,16 +34,34 @@ public class StudyPlanService {
     private final UserAnswerRecordMapper userAnswerRecordMapper;
     private final StudyPlanMapper studyPlanMapper;
     private final DailyStudyRecordMapper dailyStudyRecordMapper;
+    private final UserCourseMapper userCourseMapper;
+
+    /** 判定"已掌握/已完成"的阈值，与 AnalysisAlgorithmService 保持一致 */
+    private static final int MASTER_THRESHOLD = 60;
+
+    /** 每日建议学习知识点数，用于进度估算 */
+    private static final int PER_DAY_STEPS = 3;
     private final CourseService courseService;
     private final QuestionService questionService;
     private final AnalysisAlgorithmService analysisAlgorithmService;
 
     /**
-     * 个性化推荐：综合打分排序（先修满足度 + 难度权重 + 掌握度接近阈值），
-     * 由 AnalysisAlgorithmService.recommendLearningPath 实现。
+     * 课程维度整课推荐：由 AnalysisAlgorithmService.recommendLearningPath（PC-TOP 整课候选域）实现。
+     * 仅在用户处于课程级入口、没有指定具体知识点时使用；指定了知识点则走 recommendPrerequisites。
      */
     public List<RecommendationVO> getRecommendations(Integer userId, Integer courseId) {
         return analysisAlgorithmService.recommendLearningPath(userId.longValue(), courseId.longValue());
+    }
+
+    /**
+     * 知识点前置推荐：指定 kpId 时只推荐该知识点在知识图谱先修链上的前置节点，
+     * 不混入本节其他知识点；未指定 kpId 时保持原整课推荐行为。
+     */
+    public List<RecommendationVO> getRecommendations(Integer userId, Integer courseId, String kpId) {
+        if (kpId != null && !kpId.isBlank()) {
+            return analysisAlgorithmService.recommendPrerequisites(userId, courseId, kpId.trim());
+        }
+        return getRecommendations(userId, courseId);
     }
 
     /**
@@ -75,6 +95,128 @@ public class StudyPlanService {
             plan.computeIfAbsent(day, k -> new ArrayList<>()).add(remaining.get(i));
         }
         return plan;
+    }
+
+    /**
+     * 完整学习计划：基于知识图谱 PREREQUISITE 依赖的拓扑排序生成全部学习步骤
+     * （不过滤已掌握节点），每步附带依赖说明与完成状态（knowledge_mastery >= 60），
+     * 并汇总总进度（完成率、预计学习天数）。
+     */
+    public FullStudyPlanVO getFullPlan(Integer userId, Integer courseId) {
+        Course course = courseService.getCourseById(courseId);
+        String source = course.getSource();
+
+        List<LearningPathItemVO> path = knowledgeGraphRepository.findLearningPathBySource(source);
+
+        // 掌握度查找表（user + course 维度）
+        List<KnowledgeMastery> masteries = knowledgeMasteryMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeMastery>()
+                        .eq(KnowledgeMastery::getUserId, userId)
+                        .eq(KnowledgeMastery::getCourseId, courseId));
+        Map<String, Integer> masteryMap = new HashMap<>();
+        for (KnowledgeMastery km : masteries) {
+            masteryMap.put(km.getKnowledgePointId(),
+                    km.getMasteryLevel() == null ? 0 : km.getMasteryLevel());
+        }
+
+        List<StudyPlanStepVO> steps = new ArrayList<>();
+        int completedCount = 0;
+        for (LearningPathItemVO item : path) {
+            StudyPlanStepVO step = new StudyPlanStepVO();
+            step.setOrder(item.getOrder());
+            step.setKpId(item.getId());
+            step.setName(item.getName());
+            step.setDescription(item.getDescription());
+            step.setGroup(item.getGroup());
+
+            int mastery = masteryMap.getOrDefault(item.getId(), 0);
+            step.setMastery(mastery);
+            boolean completed = mastery >= MASTER_THRESHOLD;
+            step.setCompleted(completed);
+            if (completed) {
+                completedCount++;
+            }
+
+            List<String> prereqIds = item.getPrerequisites() == null
+                    ? Collections.emptyList() : item.getPrerequisites();
+            step.setPrerequisites(prereqIds);
+            List<String> prereqNames = new ArrayList<>();
+            for (String pid : prereqIds) {
+                prereqNames.add(knowledgeGraphRepository.findDetailById(pid)
+                        .map(KnowledgePointDetailVO::getName).orElse(pid));
+            }
+            step.setPrerequisiteNames(prereqNames);
+
+            steps.add(step);
+        }
+
+        FullStudyPlanVO vo = new FullStudyPlanVO();
+        vo.setCourseId(courseId);
+        vo.setCourseName(course.getName());
+        vo.setTotalSteps(steps.size());
+        vo.setCompletedSteps(completedCount);
+        vo.setCompletionRate(steps.isEmpty() ? 0
+                : (int) Math.round(completedCount * 100.0 / steps.size()));
+        vo.setEstimatedDays(steps.isEmpty() ? 0
+                : (int) Math.ceil(steps.size() / (double) PER_DAY_STEPS));
+        vo.setSteps(steps);
+        return vo;
+    }
+
+    /**
+     * 标记学习步骤完成/取消完成：
+     * 落库 knowledge_mastery（完成置 100、取消置 0），完成状态统一按 mastery >= 60 判定；
+     * 同时同步 user_course.progress 为最新完成率，不新建表。
+     */
+    public void completePlanStep(Integer userId, Integer courseId, String kpId, boolean completed) {
+        if (kpId == null || kpId.isEmpty()) {
+            return;
+        }
+        KnowledgeMastery km = knowledgeMasteryMapper.selectOne(
+                new LambdaQueryWrapper<KnowledgeMastery>()
+                        .eq(KnowledgeMastery::getUserId, userId)
+                        .eq(KnowledgeMastery::getKnowledgePointId, kpId));
+        if (completed) {
+            if (km == null) {
+                km = new KnowledgeMastery();
+                km.setUserId(userId);
+                km.setCourseId(courseId);
+                km.setKnowledgePointId(kpId);
+                km.setMasteryLevel(100);
+                km.setTotalAttempts(0);
+                km.setCorrectAttempts(0);
+                km.setLastAttemptTime(LocalDateTime.now());
+                knowledgeMasteryMapper.insert(km);
+            } else {
+                km.setCourseId(courseId);
+                km.setMasteryLevel(100);
+                km.setLastAttemptTime(LocalDateTime.now());
+                knowledgeMasteryMapper.updateById(km);
+            }
+        } else {
+            if (km != null) {
+                km.setMasteryLevel(0);
+                km.setLastAttemptTime(LocalDateTime.now());
+                knowledgeMasteryMapper.updateById(km);
+            }
+        }
+        syncCourseProgress(userId, courseId);
+    }
+
+    /** 同步课程总进度：user_course.progress = 完整学习计划完成率 */
+    private void syncCourseProgress(Integer userId, Integer courseId) {
+        FullStudyPlanVO plan = getFullPlan(userId, courseId);
+        if (plan.getTotalSteps() == 0) {
+            return;
+        }
+        UserCourse userCourse = userCourseMapper.selectOne(
+                new LambdaQueryWrapper<UserCourse>()
+                        .eq(UserCourse::getUserId, userId)
+                        .eq(UserCourse::getCourseId, courseId));
+        if (userCourse != null) {
+            userCourse.setProgress(plan.getCompletionRate());
+            userCourseMapper.updateById(userCourse);
+        }
     }
 
     /**

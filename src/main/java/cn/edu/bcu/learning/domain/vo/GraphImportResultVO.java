@@ -35,6 +35,12 @@ public class GraphImportResultVO {
     /** 由节点表 parentId 自动生成的关系数 */
     private int autoRelations;
 
+    /** 导入后依据图谱内容自动生成的章节数 */
+    private int chaptersGenerated;
+
+    /** 导入后自动归属到章节的知识点数 */
+    private int knowledgePointsAttached;
+
     /** 失败行数 */
     private int failCount;
 

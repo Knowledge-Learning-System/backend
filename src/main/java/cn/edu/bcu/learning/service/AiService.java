@@ -133,6 +133,21 @@ public class AiService {
         return aiMessageMapper.selectByUserAndCourse(userId, courseId);
     }
 
+    /** 是否已配置可用的模型 API Key */
+    public boolean isConfigured() {
+        return apiKey != null && !apiKey.isBlank();
+    }
+
+    /**
+     * 通用大模型补全（非流式），供诊断分析等其他模块复用，不写问答历史。
+     */
+    public String complete(String systemPrompt, String userPrompt) {
+        List<QwenMessage> messages = new ArrayList<>();
+        messages.add(QwenMessage.system(systemPrompt));
+        messages.add(new QwenMessage("user", userPrompt));
+        return callQwenApi(messages);
+    }
+
     // ---- 内部方法 ----
 
     private String buildCourseContext(Long courseId) {

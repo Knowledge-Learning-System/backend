@@ -12,4 +12,10 @@ public class RadarItemVO {
     private String name;
     /** 掌握度 0-100 */
     private Integer mastery;
+    /** RSM 式等级评定：未掌握 / 初步掌握 / 熟练 / 精通 */
+    private String level;
+
+    public RadarItemVO(String id, String name, Integer mastery) {
+        this(id, name, mastery, null);
+    }
 }

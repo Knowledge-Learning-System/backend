@@ -6,6 +6,7 @@ import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Repository;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Repository
 @RequiredArgsConstructor
@@ -144,6 +145,54 @@ public class KnowledgeGraphRepository {
     }
 
     /**
+     * 批量取某 source 下全部知识点节点（不含先修关系）。
+     * 供 PC-TOP 推荐一次性加载图结构使用，避免逐点查询产生的 N+1 往返。
+     */
+    public List<LearningPathItemVO> findAllKpNodesBySource(String source) {
+        Collection<Map<String, Object>> nodeRows = neo4jClient.query("""
+                        MATCH (n:KnowledgePoint {source: $source})
+                        RETURN n.id AS id, n.name AS name, n.description AS description,
+                               n.source AS source, coalesce(n.group, 0) AS `group`
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+        List<LearningPathItemVO> result = new ArrayList<>();
+        for (Map<String, Object> row : nodeRows) {
+            LearningPathItemVO item = new LearningPathItemVO();
+            item.setId(String.valueOf(row.get("id")));
+            item.setName(String.valueOf(row.get("name")));
+            item.setDescription(row.get("description") == null ? "" : String.valueOf(row.get("description")));
+            item.setCourseId(String.valueOf(row.get("source")));
+            item.setGroup(((Number) row.get("group")).intValue());
+            item.setPrerequisites(new ArrayList<>());
+            result.add(item);
+        }
+        return result;
+    }
+
+    /**
+     * 批量取某 source 下全部 PREREQUISITE 边（一次查询）。
+     * 返回元素均为长度 2 的数组：[先修知识点id, 后继知识点id]。
+     */
+    public List<String[]> findAllPrereqEdges(String source) {
+        Collection<Map<String, Object>> rows = neo4jClient.query("""
+                        MATCH (a:KnowledgePoint {source: $source})-[:PREREQUISITE]->(b:KnowledgePoint {source: $source})
+                        RETURN a.id AS source, b.id AS target
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+        List<String[]> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            result.add(new String[]{
+                    String.valueOf(row.get("source")),
+                    String.valueOf(row.get("target"))});
+        }
+        return result;
+    }
+
+    /**
      * 拓扑排序算法，提取为公共方法供学习路径和推荐使用。
      * 返回 LearningPathItemVO 列表，order 从 1 开始。
      */
@@ -242,6 +291,106 @@ public class KnowledgeGraphRepository {
                 .bind(source).to("source")
                 .fetch()
                 .all();
+    }
+
+    /**
+     * 查询某 source 下全部 SubTopic 节点（不要求已挂到 KnowledgeArea），
+     * 同时给出其所属 KnowledgeArea（未挂载时为 null），供图谱导入后自动补齐章节层级使用。
+     */
+    public Collection<Map<String, Object>> findSubTopicsBySourceOnly(String source) {
+        return neo4jClient.query("""
+                        MATCH (st:SubTopic {source: $source})
+                        OPTIONAL MATCH (ka:KnowledgeArea)-[:HAS_SUBTOPIC]->(st)
+                        RETURN st.id AS id, st.name AS name,
+                               coalesce(st.order, 0) AS `order`, ka.id AS areaId
+                        ORDER BY coalesce(st.order, 0), st.id
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+    }
+
+    /**
+     * 查询某 source 下全部知识点与其所属章节（知识领域）的归属关系。
+     * 领域粒度取 SubTopic（章节）；未挂入章节的知识点由调用方归入“未分类”。
+     *
+     * 返回的 Map 键：kpId / subTopicId / subTopicName / subTopicOrder / areaId / areaName
+     */
+    public Collection<Map<String, Object>> findKpDomainMapBySource(String source) {
+        return neo4jClient.query("""
+                        MATCH (kp:KnowledgePoint {source: $source})
+                        OPTIONAL MATCH (st:SubTopic)-[:PART_OF]->(kp)
+                        OPTIONAL MATCH (ka:KnowledgeArea)-[:HAS_SUBTOPIC]->(st)
+                        RETURN kp.id AS kpId, st.id AS subTopicId, st.name AS subTopicName,
+                               coalesce(st.order, 0) AS subTopicOrder,
+                               ka.id AS areaId, ka.name AS areaName
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+    }
+
+    /**
+     * 查询某 source 下全部 KnowledgePoint 的基础信息（id/名称/分组/层级/顺序）。
+     */
+    public Collection<Map<String, Object>> findAllKpBasicBySource(String source) {
+        return neo4jClient.query("""
+                        MATCH (kp:KnowledgePoint {source: $source})
+                        RETURN kp.id AS id, kp.name AS name,
+                               coalesce(kp.group, 0) AS `group`,
+                               coalesce(kp.level, 0) AS level,
+                               coalesce(kp.order, 0) AS `order`
+                        ORDER BY coalesce(kp.order, 0), kp.id
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+    }
+
+    /**
+     * 查询某 source 下已归属到章节（存在 PART_OF 指向某 SubTopic）的 KnowledgePoint ID 列表。
+     */
+    public List<String> findKpIdsWithSubTopic(String source) {
+        return neo4jClient.query("""
+                        MATCH (st:SubTopic)-[:PART_OF]->(kp:KnowledgePoint {source: $source})
+                        RETURN DISTINCT kp.id AS id
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all()
+                .stream()
+                .map(row -> row.get("id") == null ? null : String.valueOf(row.get("id")))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 查询某 source 下 KnowledgeArea 节点（按 order、id 排序），用于章节自动生成时确定挂载根。
+     */
+    public Collection<Map<String, Object>> findAreasBySource(String source) {
+        return neo4jClient.query("""
+                        MATCH (ka:KnowledgeArea {source: $source})
+                        RETURN ka.id AS id, ka.name AS name
+                        ORDER BY coalesce(ka.order, 0), ka.id
+                        """)
+                .bind(source).to("source")
+                .fetch()
+                .all();
+    }
+
+    /**
+     * 删除某 source 下由系统自动生成的占位章节（id 前缀 ST_AUTO_），
+     * 用于教师后续补传真实章节结构时清理历史占位章，避免章节重复。
+     * 仅删除 SubTopic 节点自身，不影响知识点。
+     */
+    public void deleteAutoSubTopics(String source) {
+        neo4jClient.query("""
+                        MATCH (st:SubTopic {source: $source})
+                        WHERE st.id STARTS WITH 'ST_AUTO_'
+                        DETACH DELETE st
+                        """)
+                .bind(source).to("source")
+                .run();
     }
 
     /**

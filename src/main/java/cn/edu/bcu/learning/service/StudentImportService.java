@@ -36,7 +36,7 @@ public class StudentImportService {
      * 从 Excel 批量导入学生 — POST /users/import
      * Excel 约定：第一行为表头，从第二行开始为数据。
      * 第一列 = 学号(username)，第二列 = 姓名(nickname)。
-     * 学号已存在的行自动跳过（幂等导入）。
+     * 学号已存在则复用账号并幂等建立选课关联；不存在则自动创建账号（默认密码 123456）。
      */
     @Transactional
     public ImportStudentResultVO importFromExcel(MultipartFile file, Long courseId) {
@@ -79,27 +79,34 @@ public class StudentImportService {
         return result;
     }
 
-    /** 导入单个学生：BCrypt 加密默认密码插入 user，并建立选课关联。学号已存在则跳过。 */
+    /**
+     * 导入单个学生：
+     * 学号（username）已存在 → 复用该账号，不新建 User；仅当其尚未关联指定课程时建立选课关联（幂等）；
+     * 学号不存在 → 创建新 User（BCrypt 加密默认密码、role=student、nickname=姓名），并按需建立选课关联。
+     */
     private void importOneStudent(String username, String nickname, Long courseId) {
-        Long count = userMapper.selectCount(new LambdaQueryWrapper<User>()
+        User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
                 .eq(User::getUsername, username));
-        if (count != null && count > 0) {
-            return;
+        if (user == null) {
+            user = new User();
+            user.setUsername(username);
+            user.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
+            user.setRole("student");
+            user.setNickname(nickname);
+            userMapper.insert(user);
         }
 
-        User user = new User();
-        user.setUsername(username);
-        user.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
-        user.setRole("student");
-        user.setNickname(nickname);
-        userMapper.insert(user);
-
         if (courseId != null) {
-            UserCourse userCourse = new UserCourse();
-            userCourse.setUserId(user.getId());
-            userCourse.setCourseId(courseId.intValue());
-            userCourse.setProgress(0);
-            userCourseMapper.insert(userCourse);
+            Long relCount = userCourseMapper.selectCount(new LambdaQueryWrapper<UserCourse>()
+                    .eq(UserCourse::getUserId, user.getId())
+                    .eq(UserCourse::getCourseId, courseId.intValue()));
+            if (relCount == null || relCount == 0) {
+                UserCourse userCourse = new UserCourse();
+                userCourse.setUserId(user.getId());
+                userCourse.setCourseId(courseId.intValue());
+                userCourse.setProgress(0);
+                userCourseMapper.insert(userCourse);
+            }
         }
     }
 

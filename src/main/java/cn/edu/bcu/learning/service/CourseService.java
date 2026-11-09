@@ -216,6 +216,11 @@ public class CourseService {
         course.setCourseCode(newCode);
         course.setStatus(1);
         courseMapper.insert(course);
+        // 未填写数据源标识时，统一落为 course_{courseId}，与图谱导入、章节查询使用同一口径
+        if (course.getSource() == null || course.getSource().isBlank()) {
+            course.setSource("course_" + course.getId());
+            courseMapper.updateById(course);
+        }
         return course;
     }
 
@@ -233,6 +238,10 @@ public class CourseService {
         }
         if (body.containsKey("source")) {
             course.setSource(body.get("source"));
+        }
+        // 数据源标识被清空时补回默认值，避免已上传的图谱/章节与课程脱钩
+        if (course.getSource() == null || course.getSource().isBlank()) {
+            course.setSource("course_" + courseId);
         }
         courseMapper.updateById(course);
         return course;

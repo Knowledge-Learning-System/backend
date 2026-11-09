@@ -8,6 +8,7 @@ import cn.edu.bcu.learning.domain.entity.KnowledgeMastery;
 import cn.edu.bcu.learning.domain.vo.*;
 import cn.edu.bcu.learning.repository.mysql.KnowledgeMasteryMapper;
 import cn.edu.bcu.learning.repository.neo4j.KnowledgeGraphRepository;
+import cn.edu.bcu.learning.service.AnalysisAlgorithmService;
 import cn.edu.bcu.learning.service.CourseService;
 import cn.edu.bcu.learning.service.KnowledgeGraphService;
 import cn.edu.bcu.learning.utils.Result;
@@ -26,13 +27,16 @@ public class CourseController {
     private final KnowledgeGraphService knowledgeGraphService;
     private final KnowledgeGraphRepository knowledgeGraphRepository;
     private final KnowledgeMasteryMapper knowledgeMasteryMapper;
+    private final AnalysisAlgorithmService analysisAlgorithmService;
 
     public CourseController(CourseService courseService, KnowledgeGraphService knowledgeGraphService,
-                            KnowledgeGraphRepository knowledgeGraphRepository, KnowledgeMasteryMapper knowledgeMasteryMapper) {
+                            KnowledgeGraphRepository knowledgeGraphRepository, KnowledgeMasteryMapper knowledgeMasteryMapper,
+                            AnalysisAlgorithmService analysisAlgorithmService) {
         this.courseService = courseService;
         this.knowledgeGraphService = knowledgeGraphService;
         this.knowledgeGraphRepository = knowledgeGraphRepository;
         this.knowledgeMasteryMapper = knowledgeMasteryMapper;
+        this.analysisAlgorithmService = analysisAlgorithmService;
         System.out.println("CourseController 初始化成功！");
     }
 
@@ -102,43 +106,24 @@ public class CourseController {
     @GetMapping("/{courseId}/chapters")
     public Result<List<SubTopicVO>> getChapters(@PathVariable Integer courseId) {
         Course course = courseService.getCourseById(courseId);
-        return Result.success(knowledgeGraphService.getChapterStructure(courseId, course.getSource()));
+        String source = (course.getSource() == null || course.getSource().isBlank())
+                ? "course_" + courseId : course.getSource();
+        return Result.success(knowledgeGraphService.getChapterStructure(courseId, source));
     }
 
-    // 学习推荐
+    // 学习推荐：指定 kpId 时返回该知识点的前置推荐；未指定时返回整课推荐
     @GetMapping("/{courseId}/recommendation")
-    public Result<List<RecommendationVO>> getRecommendation(@PathVariable Integer courseId, HttpServletRequest request) {
+    public Result<List<RecommendationVO>> getRecommendation(@PathVariable Integer courseId,
+                                                           @RequestParam(required = false) String kpId,
+                                                           HttpServletRequest request) {
         Integer userId = (Integer) request.getAttribute("userId");
-        Course course = courseService.getCourseById(courseId);
-        String source = course.getSource();
-
-        List<String> allKpIds = knowledgeGraphRepository.findAllKpIdsBySource(source);
-        if (allKpIds.isEmpty()) {
+        if (userId == null) {
             return Result.success(Collections.emptyList());
         }
-
-        LambdaQueryWrapper<KnowledgeMastery> wrapper = new LambdaQueryWrapper<KnowledgeMastery>()
-                .eq(KnowledgeMastery::getUserId, userId)
-                .in(KnowledgeMastery::getKnowledgePointId, allKpIds);
-        List<KnowledgeMastery> masteryList = knowledgeMasteryMapper.selectList(wrapper);
-
-        Map<String, Integer> masteryMap = masteryList.stream()
-                .collect(Collectors.toMap(KnowledgeMastery::getKnowledgePointId, KnowledgeMastery::getMasteryLevel));
-
-        List<String> sortedKpIds = allKpIds.stream()
-                .sorted(Comparator.comparingInt(kpId -> masteryMap.getOrDefault(kpId, 0)))
-                .limit(5)
-                .toList();
-
-        List<RecommendationVO> result = new ArrayList<>();
-        for (String kpId : sortedKpIds) {
-            KnowledgePointDetailVO detail = knowledgeGraphService.getKnowledgePointDetail(kpId);
-            int level = masteryMap.getOrDefault(kpId, 0);
-            String reason = "掌握度 " + level + "%" + (level < 30 ? "，建议优先学习" : "");
-            result.add(new RecommendationVO(detail.getId(), detail.getName(), detail.getDescription(), reason));
+        if (kpId == null || kpId.isBlank()) {
+            return Result.success(analysisAlgorithmService.recommendLearningPath(userId.longValue(), courseId.longValue()));
         }
-
-        return Result.success(result);
+        return Result.success(analysisAlgorithmService.recommendPrerequisites(userId, courseId, kpId.trim()));
     }
 
     @RequireRole("teacher")

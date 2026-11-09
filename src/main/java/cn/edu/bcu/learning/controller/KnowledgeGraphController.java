@@ -53,7 +53,16 @@ public class KnowledgeGraphController {
         Course course = courseService.getCourseById(courseId);
         String source = (course.getSource() == null || course.getSource().isEmpty())
                 ? "course_" + courseId : course.getSource();
-        return Result.success(knowledgeGraphService.importGraph(source, files));
+        GraphImportResultVO result = knowledgeGraphService.importGraph(source, files);
+        // 图谱写入完成后，依据图谱内容自动生成章节与章节下的知识点归属，供教师随后在章节知识点下发布资源
+        try {
+            int[] chapterStat = knowledgeGraphService.generateChaptersFromGraph(source, course.getName());
+            result.setChaptersGenerated(chapterStat[0]);
+            result.setKnowledgePointsAttached(chapterStat[1]);
+        } catch (Exception e) {
+            result.getFailDetails().add("章节自动生成失败：" + e.getMessage());
+        }
+        return Result.success(result);
     }
 
     /**

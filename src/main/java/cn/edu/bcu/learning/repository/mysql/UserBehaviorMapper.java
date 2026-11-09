@@ -10,4 +10,7 @@ public interface UserBehaviorMapper extends BaseMapper<UserBehavior> {
 
     @Select("SELECT COUNT(DISTINCT DATE(create_time)) FROM user_behavior WHERE user_id = #{userId}")
     int countActiveDays(Integer userId);
+
+    @Select("SELECT COALESCE(SUM(duration_seconds), 0) FROM user_behavior WHERE user_id = #{userId} AND action = 'study_time'")
+    int sumStudySeconds(Integer userId);
 }

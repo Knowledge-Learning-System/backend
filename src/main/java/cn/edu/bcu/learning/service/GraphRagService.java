@@ -156,7 +156,7 @@ public class GraphRagService {
         }
 
         vo.setAnswer(answer);
-        vo.setSources(buildSources(seeds));
+        vo.setSources(buildSources(seeds, findCourseIdBySource(source)));
         vo.setThinking(thinking.toString());
         vo.setPromptBuilt(prompt);
         return vo;
@@ -169,6 +169,13 @@ public class GraphRagService {
     private String findSourceByCourseId(Long courseId) {
         Course c = courseMapper.selectById(courseId);
         return c == null ? null : c.getSource();
+    }
+
+    /** 按知识图谱 source 反查课程 ID（溯源跳转用） */
+    private Long findCourseIdBySource(String source) {
+        Course c = courseMapper.selectOne(
+                new LambdaQueryWrapper<Course>().eq(Course::getSource, source).last("LIMIT 1"));
+        return c == null ? null : c.getId().longValue();
     }
 
     /** 基于问题对所有课程图谱做轻量词法匹配，返回命中最高的一门课 */
@@ -532,12 +539,13 @@ public class GraphRagService {
     // 结果组装
     // ============================================================
 
-    private List<GraphRagSourceVO> buildSources(List<ScoredKp> seeds) {
+    private List<GraphRagSourceVO> buildSources(List<ScoredKp> seeds, Long courseId) {
         List<GraphRagSourceVO> list = new ArrayList<>();
         for (ScoredKp s : seeds) {
             GraphRagSourceVO vo = new GraphRagSourceVO();
             vo.setId(s.node.id);
             vo.setName(s.node.name);
+            vo.setCourseId(courseId);
             vo.setChapter(fetchChapter(s.node.id));
             vo.setRelation("命中知识点");
             vo.setScore(s.score);

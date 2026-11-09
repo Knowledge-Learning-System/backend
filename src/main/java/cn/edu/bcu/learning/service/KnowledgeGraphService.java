@@ -257,6 +257,201 @@ public class KnowledgeGraphService {
         return result;
     }
 
+    // ==================== 图谱 → 章节 / 知识点 自动生成 ====================
+
+    /**
+     * 图谱上传完成后，依据图谱内容自动生成课程章节及其下属知识点归属。
+     * 规则（幂等，不覆盖教师已维护的层级）：
+     * 1. 该 source 下无 KnowledgeArea 时自动创建 1 个作为章节根；
+     * 2. 已有 SubTopic 但未挂到 KnowledgeArea 的，自动补 HAS_SUBTOPIC 使其在章节列表中可见；
+     * 3. 尚未归属任何章节的知识点，按「分组(group) → 父知识点(PARENT_KP)根 → 全部」的顺序归章，
+     *    生成 SubTopic 并建立 PART_OF 关系，新章节顺序接在已有章节之后。
+     *
+     * @return int[0] = 新增章节数，int[1] = 归属到章节的知识点数
+     */
+    public int[] generateChaptersFromGraph(String source, String courseName) {
+        if (source == null || source.isBlank()) {
+            return new int[]{0, 0};
+        }
+        Collection<Map<String, Object>> kpRows = knowledgeGraphRepository.findAllKpBasicBySource(source);
+        Collection<Map<String, Object>> stRows = knowledgeGraphRepository.findSubTopicsBySourceOnly(source);
+        if (kpRows.isEmpty() && stRows.isEmpty()) {
+            return new int[]{0, 0};
+        }
+
+        // 1. 章节根 KnowledgeArea
+        String areaId = resolveChapterArea(source, courseName);
+
+        // 2. 已有 SubTopic：补齐挂载与顺序（只处理 source 属于本课程的 SubTopic）
+        //    若本次图谱已带来真实章节（非系统自动占位章），先清掉历史占位章，避免章节重复
+        boolean hasRealChapter = false;
+        for (Map<String, Object> stRow : stRows) {
+            if (stRow.get("id") != null && !String.valueOf(stRow.get("id")).startsWith("ST_AUTO_")) {
+                hasRealChapter = true;
+                break;
+            }
+        }
+        if (hasRealChapter) {
+            knowledgeGraphRepository.deleteAutoSubTopics(source);
+            stRows = knowledgeGraphRepository.findSubTopicsBySourceOnly(source);
+        }
+
+        int maxOrder = 0;
+        for (Map<String, Object> stRow : stRows) {
+            if (stRow.get("id") == null) {
+                continue;
+            }
+            String stId = String.valueOf(stRow.get("id"));
+            int stOrder = stRow.get("order") == null ? 0 : ((Number) stRow.get("order")).intValue();
+            if (stRow.get("areaId") == null) {
+                knowledgeGraphRepository.upsertRelation(source, "KnowledgeArea", areaId,
+                        "SubTopic", stId, "HAS_SUBTOPIC");
+            }
+            if (stOrder <= 0) {
+                stOrder = maxOrder + 1;
+                knowledgeGraphRepository.upsertNode(source, "SubTopic", stId,
+                        stRow.get("name") == null ? stId : String.valueOf(stRow.get("name")),
+                        "", 1, 0, stOrder);
+            }
+            maxOrder = Math.max(maxOrder, stOrder);
+        }
+
+        // 3. 尚未归属任何章节的知识点
+        Set<String> assignedKpIds = new HashSet<>(knowledgeGraphRepository.findKpIdsWithSubTopic(source));
+        List<Map<String, Object>> unassigned = new ArrayList<>();
+        List<String> allKpIds = new ArrayList<>();
+        for (Map<String, Object> kpRow : kpRows) {
+            if (kpRow.get("id") == null) {
+                continue;
+            }
+            String kpId = String.valueOf(kpRow.get("id"));
+            allKpIds.add(kpId);
+            if (!assignedKpIds.contains(kpId)) {
+                unassigned.add(kpRow);
+            }
+        }
+        if (unassigned.isEmpty()) {
+            return new int[]{0, 0};
+        }
+
+        // 4. 分组
+        Map<String, List<Map<String, Object>>> groups =
+                groupUnassignedKnowledgePoints(source, kpRows, unassigned, allKpIds);
+
+        // 5. 生成章节节点 + 章节根关系 + 知识点归属关系
+        int chapterCount = 0;
+        int attachedCount = 0;
+        for (Map.Entry<String, List<Map<String, Object>>> entry : groups.entrySet()) {
+            if (entry.getValue().isEmpty()) {
+                continue;
+            }
+            int seq = maxOrder + chapterCount + 1;
+            String subTopicId = "ST_AUTO_" + seq;
+            knowledgeGraphRepository.upsertNode(source, "SubTopic", subTopicId, entry.getKey(), "", 1, 0, seq);
+            knowledgeGraphRepository.upsertRelation(source, "KnowledgeArea", areaId,
+                    "SubTopic", subTopicId, "HAS_SUBTOPIC");
+            for (Map<String, Object> kp : entry.getValue()) {
+                knowledgeGraphRepository.upsertRelation(source, "SubTopic", subTopicId,
+                        "KnowledgePoint", String.valueOf(kp.get("id")), "PART_OF");
+                attachedCount++;
+            }
+            chapterCount++;
+        }
+        return new int[]{chapterCount, attachedCount};
+    }
+
+    /** 章节根 KnowledgeArea：已存在则复用第一个，否则新建 */
+    private String resolveChapterArea(String source, String courseName) {
+        Collection<Map<String, Object>> areas = knowledgeGraphRepository.findAreasBySource(source);
+        for (Map<String, Object> area : areas) {
+            if (area.get("id") != null && !String.valueOf(area.get("id")).isEmpty()) {
+                return String.valueOf(area.get("id"));
+            }
+        }
+        String areaName = (courseName == null || courseName.isBlank()) ? "课程知识体系" : courseName;
+        String areaId = "KA_" + source;
+        knowledgeGraphRepository.upsertNode(source, "KnowledgeArea", areaId, areaName, "", 0, 0, 0);
+        return areaId;
+    }
+
+    /**
+     * 未归属知识点分组：优先按「分组」列，其次按父知识点根节点，最后归入单章。
+     */
+    private Map<String, List<Map<String, Object>>> groupUnassignedKnowledgePoints(
+            String source, Collection<Map<String, Object>> kpRows,
+            List<Map<String, Object>> unassigned, List<String> allKpIds) {
+        Map<String, List<Map<String, Object>>> groups = new LinkedHashMap<>();
+        int chapterIndex = 1;
+
+        // 4.1 按分组列（group > 0）分组
+        boolean hasGroup = false;
+        for (Map<String, Object> row : unassigned) {
+            if (row.get("group") != null && ((Number) row.get("group")).intValue() > 0) {
+                hasGroup = true;
+                break;
+            }
+        }
+        if (hasGroup) {
+            TreeMap<Integer, List<Map<String, Object>>> byGroup = new TreeMap<>();
+            for (Map<String, Object> row : unassigned) {
+                int g = row.get("group") == null ? 0 : ((Number) row.get("group")).intValue();
+                byGroup.computeIfAbsent(g, k -> new ArrayList<>()).add(row);
+            }
+            for (Map.Entry<Integer, List<Map<String, Object>>> entry : byGroup.entrySet()) {
+                List<Map<String, Object>> list = entry.getValue();
+                String firstName = list.isEmpty() ? "" : String.valueOf(list.get(0).get("name"));
+                String chapterName = "第" + chapterIndex + "章 " + firstName;
+                groups.put(chapterName, list);
+                chapterIndex++;
+            }
+            return groups;
+        }
+
+        // 4.2 按父知识点根节点分组
+        Map<String, String> parentOf = new HashMap<>();
+        for (Map<String, Object> row : knowledgeGraphRepository.findParentKpRelations(source, allKpIds)) {
+            if (row.get("childId") != null && row.get("parentId") != null) {
+                parentOf.putIfAbsent(String.valueOf(row.get("childId")), String.valueOf(row.get("parentId")));
+            }
+        }
+        if (!parentOf.isEmpty()) {
+            Map<String, String> kpNameById = new HashMap<>();
+            for (Map<String, Object> row : kpRows) {
+                if (row.get("id") != null) {
+                    kpNameById.put(String.valueOf(row.get("id")), String.valueOf(row.get("name")));
+                }
+            }
+            Map<String, List<Map<String, Object>>> byRoot = new LinkedHashMap<>();
+            List<Map<String, Object>> orphans = new ArrayList<>();
+            for (Map<String, Object> row : unassigned) {
+                String kpId = String.valueOf(row.get("id"));
+                if (!parentOf.containsKey(kpId)) {
+                    orphans.add(row);
+                    continue;
+                }
+                String root = kpId;
+                int guard = 0;
+                while (parentOf.containsKey(root) && guard++ < 200) {
+                    root = parentOf.get(root);
+                }
+                byRoot.computeIfAbsent(root, k -> new ArrayList<>()).add(row);
+            }
+            for (Map.Entry<String, List<Map<String, Object>>> entry : byRoot.entrySet()) {
+                String rootName = kpNameById.getOrDefault(entry.getKey(), entry.getKey());
+                groups.put("第" + chapterIndex + "章 " + rootName, entry.getValue());
+                chapterIndex++;
+            }
+            if (!orphans.isEmpty()) {
+                groups.put("第" + chapterIndex + "章 未分组知识点", orphans);
+            }
+            return groups;
+        }
+
+        // 4.3 兜底：全部归入单章
+        groups.put("第1章 核心知识点", new ArrayList<>(unassigned));
+        return groups;
+    }
+
     /**
      * 返回某课程（source）下的全量图谱数据（供教师端可视化）。
      */
